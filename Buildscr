@@ -22,6 +22,7 @@ in doit do chmod +x doit.exe
 in doit do zip -9 ../doit.zip * -x Buildscr
 in . do tar --exclude=Buildscr -chzf doit.tar.gz doit
 
-# And deliver those archives.
+# And deliver those archives, plus the text documentation for the web page.
 deliver doit.zip $@
 deliver doit.tar.gz $@
+deliver doit/doitdoc.txt $@
