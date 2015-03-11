@@ -1,4 +1,7 @@
 *.o
+*.exe
+*.obj
+*.res
 /doitclient
 /build.log
 /build.out
