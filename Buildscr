@@ -14,6 +14,11 @@ in doit do perl -i -pe 's/<<VER>>/$(Version)/' README
 # Build the Windows binary.
 delegate windows
   in doit do/win vcvars32 && nmake /f Makefile.vc VER=/DVERSION=$(Version)
+  # Code-sign this Windows binary, if the local bob config provides a
+  # script to do so. We assume here that the script accepts an -i
+  # option to provide a 'more info' URL, and that it signs the file in
+  # place.
+  ifneq "$(winsigncode)" "" in doit do $(winsigncode) -i http://www.chiark.greenend.org.uk/~sgtatham/doit/ doit.exe
   return doit/doit.exe
 enddelegate
 in doit do chmod +x doit.exe
