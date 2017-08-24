@@ -12,15 +12,20 @@ in doit do ./mkauto.sh
 in doit do perl -i -pe 's/<<VER>>/$(Version)/' README
 
 # Build the Windows binary.
-delegate windows
-  in doit with visualstudio do/win nmake /f Makefile.vc VER=/DVERSION=$(Version)
+ifneq "$(VISUAL_STUDIO)" "yes" then
+  in doit with clangcl64 do make -f Makefile.vc VER=/DVERSION=$(Version) CL_CMD='clang-cl --target=x86_64-pc-windows-msvc18.0.0' LINK_CMD=lld-link RC_CMD='x86_64-w64-mingw32-windres --preprocessor=clang-cl --preprocessor-arg=/TC --preprocessor-arg=/E -o $$@'
   # Code-sign this Windows binary, if the local bob config provides a
   # script to do so. We assume here that the script accepts an -i
   # option to provide a 'more info' URL, and that it signs the file in
   # place.
-  ifneq "$(winsigncode)" "" in doit do $(winsigncode) -i https://www.chiark.greenend.org.uk/~sgtatham/doit/ doit.exe
-  return doit/doit.exe
-enddelegate
+  ifneq "$(cross_winsigncode)" "" in doit do $(cross_winsigncode) -i https://www.chiark.greenend.org.uk/~sgtatham/doit/ doit.exe
+else
+  delegate windows
+    in doit with visualstudio do/win nmake /f Makefile.vc VER=/DVERSION=$(Version)
+    ifneq "$(winsigncode)" "" in doit do $(winsigncode) -i https://www.chiark.greenend.org.uk/~sgtatham/doit/ doit.exe
+    return doit/doit.exe
+  enddelegate
+endif
 in doit do chmod +x doit.exe
 
 # Zip and tar up the source directory.

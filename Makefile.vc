@@ -1,29 +1,38 @@
+# Simple Makefile for the Windows part of DoIt.
 #
-# Use `nmake' to build.
-#
+# Should work with nmake and Visual Studio, but is also flexible
+# enough to work with GNU make and free-software build tools such as
+# clang-cl or MinGW if you define the *_CMD variables appropriately on
+# the command line.
 
-CFLAGS = /nologo /W3 /YX /O2 /Yd /D_WINDOWS /DDEBUG /ML /Fd
-LFLAGS = /incremental:no
+CL_CMD = cl /nologo /W3 /YX /Yd /D_WINDOWS /DDEBUG /ML /Fd
+LINK_CMD = link /incremental:no
+RC_CMD = rc -r
+DEL = del
+CFLAGS = /O2
+LFLAGS =
+
+.SUFFIXES: .c .obj
 
 .c.obj:
-	cl $(COMPAT) $(CFLAGS) $(VER) /c $*.c
+	$(CL_CMD) $(CFLAGS) $(COMPAT) $(VER) /c $*.c
 
 LIBS = gdi32.lib user32.lib wsock32.lib shell32.lib
 
 all: doit.exe
 
 doit.exe: listener.obj doit.obj doitlib.obj doit.res
-	link $(LFLAGS) -out:doit.exe listener.obj doit.obj doitlib.obj doit.res $(LIBS)
+	$(LINK_CMD) $(LFLAGS) -out:doit.exe listener.obj doit.obj doitlib.obj doit.res $(LIBS)
 
 doit.res: doit.rc doit.ico doitsmall.ico
-	rc -r doit.rc
+	$(RC_CMD) doit.rc
 
 clean:
-	del *.obj
-	del *.exe
-	del *.res
-	del *.pch
-	del *.aps
-	del *.ilk
-	del *.pdb
-	del *.rsp
+	$(DEL) *.obj
+	$(DEL) *.exe
+	$(DEL) *.res
+	$(DEL) *.pch
+	$(DEL) *.aps
+	$(DEL) *.ilk
+	$(DEL) *.pdb
+	$(DEL) *.rsp
