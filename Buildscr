@@ -13,12 +13,19 @@ in doit do perl -i -pe 's/<<VER>>/$(Version)/' README
 
 # Build the Windows binary.
 ifneq "$(VISUAL_STUDIO)" "yes" then
-  in doit with clangcl64 do make -f Makefile.vc VER=/DVERSION=$(Version) CL_CMD='clang-cl --target=x86_64-pc-windows-msvc18.0.0' LINK_CMD=lld-link RC_CMD='x86_64-w64-mingw32-windres --preprocessor=clang-cl --preprocessor-arg=/TC --preprocessor-arg=/E -o $$@'
-  # Code-sign this Windows binary, if the local bob config provides a
-  # script to do so. We assume here that the script accepts an -i
-  # option to provide a 'more info' URL, and that it signs the file in
-  # place.
-  ifneq "$(cross_winsigncode)" "" in doit do $(cross_winsigncode) -i https://www.chiark.greenend.org.uk/~sgtatham/doit/ doit.exe
+  # Even in clang-cl cross-building mode, use a bob delegation (in
+  # this case, just to self) to arrange that the intermediate build
+  # products (.obj files etc) don't end up in the distribution archive
+  # by mistake.
+  delegate -
+    in doit with clangcl64 do make -f Makefile.vc VER=/DVERSION=$(Version) CL_CMD='clang-cl --target=x86_64-pc-windows-msvc18.0.0' LINK_CMD=lld-link RC_CMD='x86_64-w64-mingw32-windres --preprocessor=clang-cl --preprocessor-arg=/TC --preprocessor-arg=/E -o $$@'
+    # Code-sign this Windows binary, if the local bob config provides a
+    # script to do so. We assume here that the script accepts an -i
+    # option to provide a 'more info' URL, and that it signs the file in
+    # place.
+    ifneq "$(cross_winsigncode)" "" in doit do $(cross_winsigncode) -i https://www.chiark.greenend.org.uk/~sgtatham/doit/ doit.exe
+    return doit/doit.exe
+  enddelegate
 else
   delegate windows
     in doit with visualstudio do/win nmake /f Makefile.vc VER=/DVERSION=$(Version)
