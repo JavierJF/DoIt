@@ -220,6 +220,34 @@ struct process start_process(char *cmdline, int wait, int output, char *dir)
         si.wShowWindow = SW_HIDE;
         inherit = TRUE;
         ret.fromchild = fromchild;
+    } else {
+        /*
+         * Arcane incantation to permit the main window of the process
+         * being created to appear in the foreground and get the
+         * keyboard focus.
+         *
+         * Source: this thread
+         *   http://groups.google.com/group/microsoft.public.win32.programmer.ui/browse_thread/thread/3f8401be9c874741/ef8cca87677b5e0a?lnk=st&q=setforegroundwindow+workaround&rnum=4&hl=en#ef8cca87677b5e0a
+         *
+         * which points out that the MS documentation for
+         * SetForegroundWindow() lists assorted conditions on when a
+         * process is permitted to set the foreground window. One of
+         * them is 'the process received the last input event'; so the
+         * code below is essentially a hack, because it makes up a
+         * phony input event for our process to have received.
+         *
+         * That thread recommends using the keybd_event() API call,
+         * but MS's documentation for _that_ says it's deprecated and
+         * recommends using SendInput() instead.
+         */
+        INPUT in;
+        in.type = INPUT_KEYBOARD;
+        in.ki.wVk = 0;
+        in.ki.wScan = 0;
+        in.ki.dwFlags = 0;
+        in.ki.time = 0;
+        in.ki.dwExtraInfo = 0;
+        SendInput(1, &in, sizeof(in));
     }
     if (CreateProcess(NULL, cmdline, NULL, NULL, inherit,
                       CREATE_NEW_CONSOLE | NORMAL_PRIORITY_CLASS,
