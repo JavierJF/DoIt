@@ -70,6 +70,67 @@ int listener_nports = sizeof(port_array) / sizeof(*port_array);
 int const *listener_ports = port_array;
 
 /*
+ * Small struct for accumulating error messages.
+ */
+struct msgbuf {
+    char *buf;
+    int len, size;
+};
+
+void msgbuf_ensure(struct msgbuf *mb, int size_needed)
+{
+    if (mb->size < size_needed) {
+        mb->size = size_needed * 5 / 4 + 256;
+        mb->buf = realloc(mb->buf, mb->size);
+    }
+}
+
+char *msgbuf_endptr(struct msgbuf *mb, int len_needed)
+{
+    msgbuf_ensure(mb, mb->len + len_needed);
+    return mb->buf ? mb->buf + mb->len : NULL;
+}
+
+void msgbuf_append(struct msgbuf *mb, const char *str)
+{
+    int len = strlen(str);
+    char *ptr = msgbuf_endptr(mb, len);
+    if (ptr) {
+        memcpy(ptr, str, len);
+        mb->len += len;
+    }
+}
+
+void msgbuf_append_win_error(struct msgbuf *mb, unsigned error)
+{
+    char *ptr;
+
+    if ((ptr = msgbuf_endptr(mb, 64)) != NULL) {
+        mb->len += sprintf(ptr, "Error %u: ", error);
+    }
+
+    if ((ptr = msgbuf_endptr(mb, 0x10000)) != NULL) {
+        if (!FormatMessage((FORMAT_MESSAGE_FROM_SYSTEM |
+                            FORMAT_MESSAGE_IGNORE_INSERTS), NULL, error,
+                           MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                           ptr, 0xFFFF, NULL)) {
+            mb->len += sprintf(ptr,
+                               "(unable to format: FormatMessage returned %u)",
+                               (unsigned int)GetLastError());
+        } else {
+            mb->len += strlen(ptr);
+            if (ptr[0] && mb->buf[mb->len - 1] == '\n')
+                mb->len--;
+        }
+    }
+}
+
+void msgbuf_getlasterror(struct msgbuf *mb)
+{
+    msgbuf_append_win_error(mb, GetLastError());
+}
+
+/*
  * Load the secret out of a file.
  */
 static void load_secret(void) {
@@ -116,7 +177,7 @@ static int do_send(SOCKET sock, void *buffer, int len)
         return sent;
 }
 
-char *write_clip(char *data, int len)
+void write_clip(char *data, int len, struct msgbuf *mb)
 {
     HGLOBAL clipdata;
     char *lock;
@@ -124,11 +185,15 @@ char *write_clip(char *data, int len)
     clipdata = GlobalAlloc(GMEM_DDESHARE | GMEM_MOVEABLE, len+1);
 
     if (!clipdata) {
-        return "-unable to allocate clipboard memory\n";
+        msgbuf_append(mb, "-unable to allocate clipboard memory: ");
+        msgbuf_getlasterror(mb);
+        return;
     }
     if (!(lock = GlobalLock(clipdata))) {
         GlobalFree(clipdata);
-        return "-unable to lock clipboard memory\n";
+        msgbuf_append(mb, "-unable to lock clipboard memory: ");
+        msgbuf_getlasterror(mb);
+        return;
     }
 
     memcpy(lock, data, len);
@@ -139,44 +204,51 @@ char *write_clip(char *data, int len)
         EmptyClipboard();
         SetClipboardData(CF_TEXT, clipdata);
         CloseClipboard();
-        return "+\n";
+        msgbuf_append(mb, "+");
+        return;
     } else {
+        msgbuf_append(mb, "-unable to write to clipboard: ");
+        msgbuf_getlasterror(mb);
         GlobalFree(clipdata);
-        return "-unable to write to clipboard\r\n";
+        return;
     }
 }
 
-char *read_clip(int *is_err)
+char *read_clip(struct msgbuf *mb)
 {
     HGLOBAL clipdata;
     char *s;
 
     if (!OpenClipboard(NULL)) {
-        *is_err = 1;
-        return "-unable to read clipboard\r\n";
+        msgbuf_append(mb, "-unable to read clipboard: ");
+        msgbuf_getlasterror(mb);
+        return NULL;
     }
     clipdata = GetClipboardData(CF_TEXT);
     CloseClipboard();
     if (!clipdata) {
-        *is_err = 1;
-        return "-clipboard contains no text\r\n";
+        msgbuf_append(mb, "-clipboard contains no text: ");
+        msgbuf_getlasterror(mb);
+        return NULL;
     }
     s = GlobalLock(clipdata);
     if (!s) {
-        *is_err = 1;
-        return "-unable to lock clipboard memory\r\n";
+        msgbuf_append(mb, "-unable to lock clipboard memory: ");
+        msgbuf_getlasterror(mb);
+        return NULL;
     }
-    *is_err = 0;
+    msgbuf_append(mb, "+");
     return s;
 }
 
 struct process {
-    char *error;
+    int ok;
     HANDLE fromchild;
     HANDLE hproc;
 };
 
-struct process start_process(char *cmdline, int wait, int output, char *dir)
+struct process start_process(char *cmdline, int wait, int output, char *dir,
+                             struct msgbuf *mb)
 {
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
@@ -185,7 +257,7 @@ struct process start_process(char *cmdline, int wait, int output, char *dir)
     int inherit = FALSE;
     struct process ret;
 
-    ret.error = NULL;
+    ret.ok = 0;
     memset(&si, 0, sizeof(si));
     si.cb = sizeof(si);
     si.wShowWindow = SW_SHOWNORMAL;
@@ -197,20 +269,23 @@ struct process start_process(char *cmdline, int wait, int output, char *dir)
         sa.lpSecurityDescriptor = NULL;
         if (!CreatePipe(&parentout, &childout, &sa, 0) ||
             !CreatePipe(&childin, &parentin, &sa, 0)) {
-            ret.error = "-CreatePipe failed\n";
+            msgbuf_append(mb, "-CreatePipe failed: ");
+            msgbuf_getlasterror(mb);
             return ret;
         }
         if (!DuplicateHandle(GetCurrentProcess(), parentin,
                              GetCurrentProcess(), &tochild,
                              0, FALSE, DUPLICATE_SAME_ACCESS)) {
-            ret.error = "-DuplicateHandle failed\n";
+            msgbuf_append(mb, "-DuplicateHandle failed: ");
+            msgbuf_getlasterror(mb);
             return ret;
         }
         CloseHandle(parentin);
         if (!DuplicateHandle(GetCurrentProcess(), parentout,
                              GetCurrentProcess(), &fromchild,
                              0, FALSE, DUPLICATE_SAME_ACCESS)) {
-            ret.error = "-DuplicateHandle failed\n";
+            msgbuf_append(mb, "-DuplicateHandle failed: ");
+            msgbuf_getlasterror(mb);
             return ret;
         }
         CloseHandle(parentout);
@@ -252,15 +327,17 @@ struct process start_process(char *cmdline, int wait, int output, char *dir)
     if (CreateProcess(NULL, cmdline, NULL, NULL, inherit,
                       CREATE_NEW_CONSOLE | NORMAL_PRIORITY_CLASS,
                       NULL, dir, &si, &pi) == 0) {
-        ret.error = "-CreateProcess failed\n";
+        msgbuf_append(mb, "-CreateProcess failed: ");
+        msgbuf_getlasterror(mb);
     } else {
         ret.hproc = pi.hProcess;
+        ret.ok = 1;
     }
     if (output) {
         CloseHandle(childin);
         CloseHandle(childout);
         CloseHandle(tochild);
-        if (ret.error)
+        if (!ret.ok)
             CloseHandle(fromchild);
     }
     return ret;
@@ -365,6 +442,13 @@ int do_doit_send_str(SOCKET sock, doit_ctx *ctx, char *str)
 {
     return do_doit_send(sock, ctx, str, strlen(str));
 }
+int do_doit_send_mb(SOCKET sock, doit_ctx *ctx, struct msgbuf *mb)
+{
+    if (mb->buf)
+        return do_doit_send(sock, ctx, mb->buf, mb->len);
+    else
+        return do_doit_send_str(sock, ctx, "-out of memory in msgbuf\n");
+}
 
 /*
  * Export the function that handles a connection.
@@ -375,6 +459,7 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
     doit_ctx *ctx = NULL;
     char *cmdline = NULL, *currdir = NULL;
     DWORD threadid;
+    struct msgbuf amb = { NULL, 0, 0 }, *mb = &amb;
 
     if (secret_reload)
 	load_secret();
@@ -471,15 +556,16 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
 	     * to the Windows clipboard.
 	     */
 	    int len;
-	    char *msg;
 	    free(cmdline); cmdline = NULL;
 	    cmdline = do_fetch_all(sock, ctx, &len);
 	    if (cmdline) {
-		msg = write_clip(cmdline, len);
+		write_clip(cmdline, len, mb);
 		free(cmdline); cmdline = NULL;
-	    } else
-		msg = "-error reading input\n";
-	    do_doit_send_str(sock, ctx, msg);
+	    } else {
+                msgbuf_append(mb, "-error reading input");
+            }
+            msgbuf_append(mb, "\n");
+	    do_doit_send_mb(sock, ctx, mb);
 	    goto done;
 	}
 
@@ -489,23 +575,19 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
 	     * length followed by the text, and then send either
 	     * "+\n" or "-error message\n".
 	     */
-	    int is_err;
-	    char *data = read_clip(&is_err);
+	    char *data = read_clip(mb);
+            int len = data ? strlen(data) : 0;
 	    char length[4];
 
-	    if (is_err) {
-		/* data is an error message */
-		PUT_32BIT_MSB_FIRST(length, 0);
-		do_doit_send(sock, ctx, length, 4);
-		do_doit_send_str(sock, ctx, data);
-	    } else {
-		int len = strlen(data);
-		PUT_32BIT_MSB_FIRST(length, len);
-		do_doit_send(sock, ctx, length, 4);
-		do_doit_send(sock, ctx, data, len);
-		do_doit_send_str(sock, ctx, "+\n");
-		GlobalUnlock(data);
-	    }
+            PUT_32BIT_MSB_FIRST(length, len);
+            do_doit_send(sock, ctx, length, 4);
+            if (data) {
+                do_doit_send(sock, ctx, data, len);
+                GlobalUnlock(data);
+            }
+            msgbuf_append(mb, "\n");
+	    do_doit_send_mb(sock, ctx, mb);
+
 	    goto done;
 	}
 
@@ -534,11 +616,12 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
 	    free(cmdline); cmdline = NULL;
 	    cmdline = do_fetch_line(sock, ctx);
 
-	    proc = start_process(cmdline, wait, output, currdir);
-	    if (proc.error) {
+	    proc = start_process(cmdline, wait, output, currdir, mb);
+	    if (!proc.ok) {
 		if (output)
 		    do_doit_send(sock, ctx, "\0", 1);
-		do_doit_send_str(sock, ctx, proc.error);
+                msgbuf_append(mb, "\n");
+		do_doit_send_mb(sock, ctx, mb);
 		goto done;
 	    }
 	    if (wait) {
@@ -555,7 +638,10 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
 		}
 		err = process_exit_code(proc);
 		if (err < 0) {
-		    do_doit_send_str(sock, ctx, "-GetExitCodeProcess failed\n");
+                    msgbuf_append(mb, "-GetExitCodeProcess failed: ");
+                    msgbuf_getlasterror(mb);
+                    msgbuf_append(mb, "\n");
+		    do_doit_send_mb(sock, ctx, mb);
 		} else {
 		    char buf[32];
 		    sprintf(buf, "+%d\n", err);
