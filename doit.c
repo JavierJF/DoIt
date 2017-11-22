@@ -455,6 +455,7 @@ int do_doit_send_mb(SOCKET sock, doit_ctx *ctx, struct msgbuf *mb)
  */
 int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
     int len;
+    int setup_error = 0;
     char *nonce = NULL;
     doit_ctx *ctx = NULL;
     char *cmdline = NULL, *currdir = NULL;
@@ -485,6 +486,8 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
 	    goto done;
 
 	if (!strcmp(cmdline, "SetDirectory")) {
+            DWORD attrs;
+
 	    /*
 	     * Read a second line and store it for use as the
 	     * default directory of a subsequent CreateProcess or
@@ -494,6 +497,25 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
 	    cmdline = do_fetch_line(sock, ctx);
 	    if (!cmdline)
 		goto done;
+
+            attrs = GetFileAttributes(cmdline);
+            if (attrs != INVALID_FILE_ATTRIBUTES &&
+                (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+                /* ok */
+            } else {
+                msgbuf_append(mb, "-setting directory to \"");
+                msgbuf_append(mb, cmdline);
+                msgbuf_append(mb, "\": ");
+                if (attrs == INVALID_FILE_ATTRIBUTES) {
+                    msgbuf_append(mb, "GetFileAttributes failed: ");
+                    msgbuf_getlasterror(mb);
+                } else {
+                    msgbuf_append(mb, "pathname is not a directory");
+                }
+                msgbuf_append(mb, "\n");
+                setup_error = 1;
+            }
+
 	    currdir = cmdline;
 	    continue;
 	}
@@ -515,6 +537,10 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
 		with_args = TRUE;
 	    else
 		with_args = FALSE;
+            if (setup_error) {
+                do_doit_send_mb(sock, ctx, mb);
+                goto done;
+            }
 	    free(cmdline); cmdline = NULL;
 	    cmdline = do_fetch_line(sock, ctx);
 	    if (with_args)
@@ -650,7 +676,11 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
 	    free(cmdline); cmdline = NULL;
 	    cmdline = do_fetch_line(sock, ctx);
 
-	    proc = start_process(cmdline, wait, output, currdir, mb);
+            if (!setup_error) {
+                proc = start_process(cmdline, wait, output, currdir, mb);
+            } else {
+                proc.ok = FALSE;
+            }
 	    if (!proc.ok) {
 		if (output)
 		    do_doit_send(sock, ctx, "\0", 1);
