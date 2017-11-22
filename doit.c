@@ -45,10 +45,10 @@ void SHA_Init(SHA_State *s);
 void SHA_Bytes(SHA_State *s, void *p, int len);
 void SHA_Final(SHA_State *s, unsigned char *output);
 
-static int CALLBACK AboutProc(HWND hwnd, UINT msg,
-			      WPARAM wParam, LPARAM lParam);
-static int CALLBACK LicenceProc(HWND hwnd, UINT msg,
-				WPARAM wParam, LPARAM lParam);
+static INT_PTR CALLBACK AboutProc(HWND hwnd, UINT msg,
+                                  WPARAM wParam, LPARAM lParam);
+static INT_PTR CALLBACK LicenceProc(HWND hwnd, UINT msg,
+                                    WPARAM wParam, LPARAM lParam);
 HWND aboutbox = NULL;
 
 static char *secret;
@@ -415,7 +415,7 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
 
 	if (!strcmp(cmdline, "ShellExecute") ||
 	    !strcmp(cmdline, "ShellExecuteArgs")) {
-	    int ret;
+	    INT_PTR ret;
 	    int with_args;
 	    char *args;
 	    /*
@@ -436,8 +436,8 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
 		args = do_fetch_line(sock, ctx);
 	    else
 		args = NULL;
-	    ret = (int)ShellExecute(listener_hwnd, "open", cmdline, args,
-				    currdir, SW_SHOWNORMAL);
+	    ret = (INT_PTR)ShellExecute(listener_hwnd, "open", cmdline, args,
+                                       currdir, SW_SHOWNORMAL);
 	    if (args)
 		free(args);
 	    if (ret <= 32) {
@@ -737,8 +737,8 @@ void showversion(int line, char *buffer)
 #endif
 }
 
-static int CALLBACK AboutProc(HWND hwnd, UINT msg,
-			      WPARAM wParam, LPARAM lParam)
+static INT_PTR CALLBACK AboutProc(HWND hwnd, UINT msg,
+                                  WPARAM wParam, LPARAM lParam)
 {
     char vbuf[160];
     switch (msg) {
@@ -776,8 +776,8 @@ static int CALLBACK AboutProc(HWND hwnd, UINT msg,
 /*
  * Dialog-box function for the Licence box.
  */
-static int CALLBACK LicenceProc(HWND hwnd, UINT msg,
-				WPARAM wParam, LPARAM lParam)
+static INT_PTR CALLBACK LicenceProc(HWND hwnd, UINT msg,
+                                    WPARAM wParam, LPARAM lParam)
 {
     switch (msg) {
       case WM_INITDIALOG:
