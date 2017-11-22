@@ -363,6 +363,22 @@ int process_exit_code(struct process proc)
         return exitcode;
 }
 
+int do_receive(SOCKET sock, doit_ctx *ctx)
+{
+    char buf[1024];
+    int retd;
+
+    retd = recv(sock, buf, sizeof(buf), 0);
+    if (retd == 0)
+        return 0;                      /* EOF */
+    if (retd <= 0)
+        return -1;                     /* network-layer error */
+    if (doit_incoming_data(ctx, buf, retd))
+        return -1;                     /* protocol-layer error */
+
+    return +1;                         /* ok */
+}
+
 /*
  * Helper function to fetch a whole line from the socket.
  */
@@ -370,19 +386,14 @@ char *do_fetch(SOCKET sock, doit_ctx *ctx, int line_terminate, int *length)
 {
     char *cmdline = NULL;
     int cmdlen = 0, cmdsize = 0;
-    char buf[1024];
-    int len;
 
-    /*
-     * Start with any existing buffered data.
-     */
-    len = doit_incoming_data(ctx, NULL, 0);
-    if (len < 0)
-        return NULL;
     cmdline = malloc(256);
     cmdlen = 0;
     cmdsize = 256;
     while (1) {
+        int err;
+        int len = doit_buffered(ctx);
+
         if (len > 0) {
             if (cmdsize < cmdlen + len + 1) {
                 cmdsize = cmdlen + len + 1 + 256;
@@ -402,14 +413,14 @@ char *do_fetch(SOCKET sock, doit_ctx *ctx, int line_terminate, int *length)
                 len--;
             }
         }
-        len = recv(sock, buf, sizeof(buf), 0);
-        if (len <= 0) {
-            *length = cmdlen;
-            return line_terminate ? NULL : cmdline;
-        }
-        len = doit_incoming_data(ctx, buf, len);
-        if (len < 0)
+
+        if ((err = do_receive(sock, ctx)) <= 0) {
+            if (err == 0 && !line_terminate) {
+                *length = cmdlen;
+                return cmdline;
+            }
             return NULL;
+        }
     }
 }
 char *do_fetch_line(SOCKET sock, doit_ctx *ctx)

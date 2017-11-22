@@ -31,12 +31,17 @@ void doit_perturb_nonce(doit_ctx *ctx, void *data, int len);
 void *doit_make_nonce(doit_ctx *ctx, int *output_len);
 
 /*
- * Process incoming data on a DoIt connection. Buffers any
- * plaintext for later retrieval by doit_read. Returns <0 if
- * something bad happens (like a MAC failing). Otherwise, returns
- * the current amount of buffered plaintext.
+ * Process incoming data on a DoIt connection. Buffers any plaintext
+ * for later retrieval by doit_read. Returns a static error message
+ * string if something bad happens (like a MAC failing). Otherwise,
+ * returns NULL.
  */
-int doit_incoming_data(doit_ctx *ctx, void *buf, int len);
+const char *doit_incoming_data(doit_ctx *ctx, void *buf, int len);
+
+/*
+ * Return the current amount of buffered incoming plaintext.
+ */
+int doit_buffered(doit_ctx *ctx);
 
 /*
  * Determine whether the incoming nonce has been received and the

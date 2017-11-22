@@ -1462,12 +1462,12 @@ void *doit_make_nonce(doit_ctx *ctx, int *output_len) /*{{{*/
 /*}}}*/
 
 /*
- * Process incoming data on a DoIt connection. Buffers any
- * plaintext for later retrieval by doit_read. Returns <0 if
- * something bad happens (like a MAC failing). Otherwise, returns
- * the current amount of buffered plaintext.
+ * Process incoming data on a DoIt connection. Buffers any plaintext
+ * for later retrieval by doit_read. Returns an error message string
+ * if something bad happens (like a MAC failing). Otherwise, returns
+ * NULL.
  */
-int doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
+const char *doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
 {
     unsigned char *p = (unsigned char *)buf;
 
@@ -1483,15 +1483,15 @@ int doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
         if (ctx->incoming_pos == 4) {
             ctx->their_nonce_len = 4+GET_32BIT_MSB_FIRST(ctx->incoming);
             if (ctx->their_nonce_len > PACKET_MAX)
-                return -1;
+                return "Remote sent overlarge nonce string";
             ctx->their_nonce = malloc(ctx->their_nonce_len);
             if (!ctx->their_nonce)
-                return -1;
+                return "Out of memory";
             PUT_32BIT_MSB_FIRST(ctx->their_nonce, ctx->their_nonce_len-4);
             ctx->their_nonce_got = 4;
         }
         if (len == 0)
-            return ctx->buffered - ctx->bufpos;
+            return NULL;
     }
 
     if (ctx->their_nonce_got < ctx->their_nonce_len) {
@@ -1539,7 +1539,7 @@ int doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
             ctx->incoming_pos = 0;
         }
         if (len == 0)
-            return ctx->buffered - ctx->bufpos;
+            return NULL;
     }
 
     /*
@@ -1565,14 +1565,14 @@ int doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
                 if (ctx->packet_datalen > PACKET_MAX ||
                     ctx->packet_padlen == 0 ||
                     (ctx->packet_len - SHA_LEN) % AES_BLK != 0)
-                    return -1;         /* decryption failed */
+                    return "First block of packet decrypted to garbage";
                 ctx->packet = malloc(ctx->packet_len);
                 memcpy(ctx->packet, ctx->incoming, AES_BLK);
                 ctx->packet_pos = AES_BLK;
                 ctx->incoming_pos = 0;
             }
             if (len == 0)
-                return ctx->buffered - ctx->bufpos;
+                return NULL;
         }
 
         while (len > 0 && ctx->packet_pos < ctx->packet_len) {
@@ -1591,7 +1591,7 @@ int doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
             doit_compute_mac(&ctx->incoming1, &ctx->incoming2, digest);
             if (0 != memcmp(ctx->packet + ctx->packet_len - SHA_LEN,
                             digest, SHA_LEN))
-                return -2;             /* MAC failed */
+                return "MAC validation failure on incoming packet";
             newbuffered = ctx->buffered + ctx->packet_datalen;
             if (ctx->buffer)
                 ctx->buffer = realloc(ctx->buffer, newbuffered);
@@ -1606,9 +1606,17 @@ int doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
         }
     }
 
-    return ctx->buffered - ctx->bufpos;
+    return NULL;
 }
 /*}}}*/
+
+/*
+ * Return the current amount of buffered incoming plaintext.
+ */
+int doit_buffered(doit_ctx *ctx)
+{
+    return ctx->buffered - ctx->bufpos;
+}
 
 /*
  * Determine whether the incoming nonce has been received and the
@@ -1754,14 +1762,16 @@ int main(void) {
     d2 = malloc(len1+1);
     memcpy(d2+1, d1, len1);
     d2[0] = last_nonce_chr;
-    assert(7 == doit_incoming_data(one, d2, len1+1));
+    assert(NULL == doit_incoming_data(one, d2, len1+1));
+    assert(7 == doit_buffered(one));
     assert(7 == doit_read(one, d1, 7));
     fwrite(d1, 1, 7, stdout);
     free(d1);
     free(d2);
     d1 = doit_send(one, "hello, world\n", 13, &len1);
     assert(len1 > 13);
-    assert(13 == doit_incoming_data(two, d1, len1));
+    assert(NULL == doit_incoming_data(two, d1, len1));
+    assert(13 == doit_buffered(two));
     assert(13 == doit_read(two, d1, 13));
     fwrite(d1, 1, 13, stdout);
     free(d1);
@@ -1770,7 +1780,8 @@ int main(void) {
     for (i = 0; i < len1-1; i++) {
         assert(0 == doit_incoming_data(two, d1+i, 1));
     }
-    assert(28 == doit_incoming_data(two, d1+len1-1, 1));
+    assert(NULL == doit_incoming_data(two, d1+len1-1, 1));
+    assert(28 == doit_buffered(two));
     assert(28 == doit_read(two, d1, 28));
     fwrite(d1, 1, 28, stdout);
     free(d1);
@@ -1782,7 +1793,8 @@ int main(void) {
      */
     d1 = doit_send(two, longpara, longlen, &len1);
     assert(len1 > longlen);
-    assert(longlen == doit_incoming_data(one, d1, len1));
+    assert(NULL == doit_incoming_data(one, d1, len1));
+    assert(longlen == doit_buffered(one));
     assert(longlen == doit_read(one, d1, longlen));
     fwrite(d1, 1, longlen, stdout);
     free(d1);

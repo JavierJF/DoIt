@@ -183,46 +183,40 @@ int do_send(int sock, void *buffer, int len)
         return sent;
 }
 
-int do_receive(int sock, doit_ctx *ctx)
+/* EOF message returned from do_receive. This is at a fixed address so
+ * that we can easily check if the error condition was EOF or
+ * something else. */
+const char eof_msg[] = "connection unexpectedly closed";
+
+const char *do_receive(int sock, doit_ctx *ctx)
 {
     char buf[1024];
-    int ret;
+    int retd;
 
-    ret = recv(sock, buf, sizeof(buf), 0);
-    if (ret > 0)
-        doit_incoming_data(ctx, buf, ret);
-    return ret;
+    retd = recv(sock, buf, sizeof(buf), 0);
+    if (retd <= 0)
+        return retd == 0 ? eof_msg : strerror(errno);
+    return doit_incoming_data(ctx, buf, retd);
 }
 
 int do_fetch_pascal_string(int sock, doit_ctx *ctx, char *buf)
 {
-    int x = doit_incoming_data(ctx, NULL, 0);
     unsigned char len;
-    int ret;
-    while (x == 0) {
-        if ((ret = do_receive(sock, ctx)) <= 0) {
-            if (ret == 0) {
-                fprintf(stderr, "doit: connection unexpectedly closed\n");
-            } else {
-                fprintf(stderr, "doit: network error: %s\n", strerror(errno));
-            }
+    const char *err;
+
+    while (doit_buffered(ctx) == 0) {
+        if ((err = do_receive(sock, ctx)) != NULL) {
+            fprintf(stderr, "doit: %s\n", err);
             return -1;
         }
-        x = doit_incoming_data(ctx, NULL, 0);
     }
     if (doit_read(ctx, &len, 1) != 1)
         return -1;
-    x--;
-    while (x < len) {
-        if ((ret = do_receive(sock, ctx)) <= 0) {
-            if (ret == 0) {
-                fprintf(stderr, "doit: connection unexpectedly closed\n");
-            } else {
-                fprintf(stderr, "doit: network error: %s\n", strerror(errno));
-            }
+    while (doit_buffered(ctx) < len) {
+        if ((err = do_receive(sock, ctx)) != NULL) {
+            fprintf(stderr, "doit: %s\n", err);
             return -1;
         }
-        x = doit_incoming_data(ctx, NULL, 0);
     }
     if (doit_read(ctx, buf, len) != len)
         return -1;
@@ -237,17 +231,14 @@ char *do_fetch(int sock, doit_ctx *ctx, int line_terminate, int maxlen,
 {
     char *cmdline = NULL;
     int cmdlen = 0, cmdsize = 0;
-    char buf[1024];
-    int len;
 
-    /*
-     * Start with any existing buffered data.
-     */
-    len = doit_incoming_data(ctx, NULL, 0);
     cmdline = malloc(256);
     cmdlen = 0;
     cmdsize = 256;
     while (1) {
+        const char *err;
+        int len = doit_buffered(ctx);
+
         if (len > 0) {
             if (cmdsize < cmdlen + len + 1) {
                 cmdsize = cmdlen + len + 1 + 256;
@@ -272,22 +263,21 @@ char *do_fetch(int sock, doit_ctx *ctx, int line_terminate, int maxlen,
 		}
             }
         }
-        len = recv(sock, buf, sizeof(buf), 0);
-        if (len <= 0) {
-            *length = cmdlen;
-            return line_terminate ? NULL : cmdline;
+
+        if ((err = do_receive(sock, ctx)) != NULL) {
+            if (err == eof_msg && !line_terminate) {
+                *length = cmdlen;
+                return cmdline;
+            }
+            fprintf(stderr, "doit: %s\n", err);
+            return NULL;
         }
-        len = doit_incoming_data(ctx, buf, len);
     }
 }
 char *do_fetch_line(int sock, doit_ctx *ctx)
 {
     int len;
     return do_fetch(sock, ctx, 1, 0, &len);
-}
-char *do_fetch_all(int sock, doit_ctx *ctx, int *len)
-{
-    return do_fetch(sock, ctx, 0, 0, len);
 }
 char *do_fetch_n(int sock, doit_ctx *ctx, int length, int *len)
 {
@@ -1006,14 +996,10 @@ int main(int argc, char **argv)
         data = doit_make_nonce(ctx, &len);
 
         while (!doit_got_keys(ctx)) {
-            int ret;
-            if ((ret = do_receive(sock, ctx)) <= 0) {
+            const char *err;
+            if ((err = do_receive(sock, ctx)) != NULL) {
                 close(sock);
-                if (ret == 0) {
-                    fprintf(stderr, "doit: connection unexpectedly closed\n");
-                } else {
-                    fprintf(stderr, "doit: network error: %s\n", strerror(errno));
-                }
+                fprintf(stderr, "doit: %s\n", err);
                 return 1;
             }
         }
