@@ -526,23 +526,57 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
 	    if (args)
 		free(args);
 	    if (ret <= 32) {
-		char *msg = "-ShellExecute failed: unknown error\n";
-		if (ret == 0) msg = "-ShellExecute failed: Out of memory or resources\n";
-		if (ret == ERROR_FILE_NOT_FOUND) msg = "-ShellExecute failed: File not found\n";
-		if (ret == ERROR_PATH_NOT_FOUND) msg = "-ShellExecute failed: Path not found\n";
-		if (ret == ERROR_BAD_FORMAT) msg = "-ShellExecute failed: Invalid .exe file\n";
-		if (ret == SE_ERR_ACCESSDENIED) msg = "-ShellExecute failed: Access denied\n";
-		if (ret == SE_ERR_ASSOCINCOMPLETE) msg = "-ShellExecute failed: File name association incomplete or invalid\n";
-		if (ret == SE_ERR_DDEBUSY) msg = "-ShellExecute failed: DDE busy\n";
-		if (ret == SE_ERR_DDEFAIL) msg = "-ShellExecute failed: DDE transaction failed\n";
-		if (ret == SE_ERR_DDETIMEOUT) msg = "-ShellExecute failed: DDE transaction timed out\n";
-		if (ret == SE_ERR_DLLNOTFOUND) msg = "-ShellExecute failed: DLL not found\n";
-		if (ret == SE_ERR_FNF) msg = "-ShellExecute failed: File not found\n";
-		if (ret == SE_ERR_NOASSOC) msg = "-ShellExecute failed: No application associated with this file type\n";
-		if (ret == SE_ERR_OOM) msg = "-ShellExecute failed: Out of memory\n";
-		if (ret == SE_ERR_PNF) msg = "-ShellExecute failed: Path not found\n";
-		if (ret == SE_ERR_SHARE) msg = "-ShellExecute failed: Sharing violation\n";
-		do_doit_send_str(sock, ctx, msg);
+                msgbuf_append(mb, "-ShellExecute(\"");
+                msgbuf_append(mb, cmdline);
+                msgbuf_append(mb, "\") failed: ");
+                switch (ret) {
+                  case 0:
+                    msgbuf_append(mb, "Out of memory or resources");
+                    break;
+                  case ERROR_BAD_FORMAT:
+                    msgbuf_append(mb, "Invalid .exe file");
+                    break;
+                  case SE_ERR_ACCESSDENIED:
+                    msgbuf_append(mb, "Access denied");
+                    break;
+                  case SE_ERR_ASSOCINCOMPLETE:
+                    msgbuf_append(mb, "File name association incomplete "
+                                  "or invalid");
+                    break;
+                  case SE_ERR_DDEBUSY:
+                    msgbuf_append(mb, "DDE busy");
+                    break;
+                  case SE_ERR_DDEFAIL:
+                    msgbuf_append(mb, "DDE transaction failed");
+                    break;
+                  case SE_ERR_DDETIMEOUT:
+                    msgbuf_append(mb, "DDE transaction timed out");
+                    break;
+                  case SE_ERR_DLLNOTFOUND:
+                    msgbuf_append(mb, "DLL not found");
+                    break;
+                  case SE_ERR_FNF:
+                    msgbuf_append(mb, "File not found");
+                    break;
+                  case SE_ERR_NOASSOC:
+                    msgbuf_append(mb, "No application associated with "
+                                  "this file type");
+                    break;
+                  case SE_ERR_OOM:
+                    msgbuf_append(mb, "Out of memory");
+                    break;
+                  case SE_ERR_PNF:
+                    msgbuf_append(mb, "Path not found");
+                    break;
+                  case SE_ERR_SHARE:
+                    msgbuf_append(mb, "Sharing violation");
+                    break;
+                  default:
+                    msgbuf_append(mb, "unknown error code");
+                    break;
+                }
+                msgbuf_append(mb, "\n");
+		do_doit_send_mb(sock, ctx, mb);
 	    } else {
 		do_doit_send_str(sock, ctx, "+\n");
 	    }
