@@ -72,7 +72,7 @@ void *doit_send(doit_ctx *ctx, void *buf, int len, int *output_len);
   ((unsigned long)(unsigned char)(cp)[0] << 24))
 
 #define PUT_32BIT_MSB_FIRST(cp, value) do { \
-  (cp)[3] = (value); \
-  (cp)[2] = (value) >> 8; \
-  (cp)[1] = (value) >> 16; \
-  (cp)[0] = (value) >> 24; } while (0)
+  (cp)[3] = 0xFF & (value); \
+  (cp)[2] = 0xFF & ((value) >> 8); \
+  (cp)[1] = 0xFF & ((value) >> 16); \
+  (cp)[0] = 0xFF & ((value) >> 24); } while (0)

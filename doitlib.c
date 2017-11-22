@@ -98,8 +98,8 @@ void SHA_Init(SHA_State *s) {
     s->lenhi = s->lenlo = 0;
 }
 
-void SHA_Bytes(SHA_State *s, void *p, int len) {
-    unsigned char *q = (unsigned char *)p;
+void SHA_Bytes(SHA_State *s, const void *p, int len) {
+    const unsigned char *q = (const unsigned char *)p;
     uint32 wordblock[16];
     uint32 lenw = len;
     int i;
@@ -1294,6 +1294,7 @@ static void aes_decrypt_cbc(unsigned char *blk, int len, AESContext * ctx)
 #define AES_BLK 16
 #define PACKET_MAX 1024
 #define BUF_MOVE_THRESHOLD 1024
+#define PROTOCOL_VERSION 0x10000U
 /*}}}*/
 
 /*{{{ doit_ctx structure itself */
@@ -1308,17 +1309,19 @@ struct doit_ctx_tag {
     int padding_pos, padding_count;
     unsigned char *secret;
     int secret_len;
+    int done_greeting;
     unsigned char our_nonce[SHA_LEN+4];
     int our_nonce_len;
     unsigned char *their_nonce;
-    int their_nonce_len, their_nonce_got;
-    unsigned char incoming[AES_BLK];
+    int their_nonce_len;
+    unsigned char incoming[PACKET_MAX + 12 + SHA_LEN];
     int incoming_pos;
     unsigned char *packet;
     int packet_pos, packet_len;
     int packet_datalen, packet_padlen;
     unsigned char *buffer;
     int buffered, bufpos;
+    char errbuf[1024];
 };
 /*}}}*/
 
@@ -1328,14 +1331,23 @@ static void doit_makekey(doit_ctx *ctx, char id,
                          int direction, unsigned char *key) /*{{{*/
 {
     SHA_State s;
+    unsigned char lenbuf[4];
     SHA_Init(&s);
     SHA_Bytes(&s, &id, 1);
     SHA_Bytes(&s, ctx->secret, ctx->secret_len);
     if (direction == OUTGOING) {
+        PUT_32BIT_MSB_FIRST(lenbuf, ctx->our_nonce_len);
+        SHA_Bytes(&s, lenbuf, 4);
         SHA_Bytes(&s, ctx->our_nonce, ctx->our_nonce_len);
+        PUT_32BIT_MSB_FIRST(lenbuf, ctx->their_nonce_len);
+        SHA_Bytes(&s, lenbuf, 4);
         SHA_Bytes(&s, ctx->their_nonce, ctx->their_nonce_len);
     } else {
+        PUT_32BIT_MSB_FIRST(lenbuf, ctx->their_nonce_len);
+        SHA_Bytes(&s, lenbuf, 4);
         SHA_Bytes(&s, ctx->their_nonce, ctx->their_nonce_len);
+        PUT_32BIT_MSB_FIRST(lenbuf, ctx->our_nonce_len);
+        SHA_Bytes(&s, lenbuf, 4);
         SHA_Bytes(&s, ctx->our_nonce, ctx->our_nonce_len);
     }
     SHA_Final(&s, key);
@@ -1383,6 +1395,36 @@ static void doit_make_padding(doit_ctx *ctx, void *data, int len) /*{{{*/
 }
 /*}}}*/
 
+static void doit_compute_secret_id(doit_ctx *ctx,
+                                   const void *nonce, int noncelen,
+                                   unsigned char *output)
+{
+    SHA_State s;
+    unsigned char preid[SHA_LEN], lenbuf[4];
+
+    /* secret-preid */
+    SHA_Init(&s);
+    SHA_Bytes(&s, "i", 1);
+    PUT_32BIT_MSB_FIRST(lenbuf, noncelen);
+    SHA_Bytes(&s, lenbuf, 4);
+    SHA_Bytes(&s, nonce, noncelen);
+    PUT_32BIT_MSB_FIRST(lenbuf, ctx->secret_len);
+    SHA_Bytes(&s, lenbuf, 4);
+    SHA_Bytes(&s, ctx->secret, ctx->secret_len);
+    SHA_Final(&s, preid);
+
+    /* secret-id */
+    SHA_Init(&s);
+    SHA_Bytes(&s, "I", 1);
+    PUT_32BIT_MSB_FIRST(lenbuf, noncelen);
+    SHA_Bytes(&s, lenbuf, 4);
+    SHA_Bytes(&s, nonce, noncelen);
+    PUT_32BIT_MSB_FIRST(lenbuf, SHA_LEN);
+    SHA_Bytes(&s, lenbuf, 4);
+    SHA_Bytes(&s, preid, SHA_LEN);
+    SHA_Final(&s, output);
+}
+
 /*}}}*/
 
 /*
@@ -1398,6 +1440,7 @@ doit_ctx *doit_init_ctx(void *secret, int secret_len) /*{{{*/
     ctx->secret_len = secret_len;
     ctx->their_nonce = NULL;
     ctx->their_nonce_len = 0;
+    ctx->done_greeting = 0;
     ctx->incoming_pos = 0;
     ctx->packet = NULL;
     ctx->buffer = NULL;
@@ -1444,19 +1487,22 @@ void *doit_make_nonce(doit_ctx *ctx, int *output_len) /*{{{*/
 {
     time_t t = time(NULL);
     unsigned char digest[SHA_LEN];
-    unsigned char *buf;
+    unsigned char *buf, *p;
 
     SHA_Bytes(&ctx->nonceH, &t, sizeof(t));
-    SHA_Final(&ctx->nonceH, digest);
+    SHA_Final(&ctx->nonceH, ctx->our_nonce);
+    ctx->our_nonce_len = SHA_LEN;
 
-    buf = malloc(SHA_LEN+4);
-    PUT_32BIT_MSB_FIRST(buf, SHA_LEN);
-    memcpy(buf+4, digest, SHA_LEN);
+    buf = malloc(4 + 4 + ctx->our_nonce_len + 4 + SHA_LEN);
+    p = buf;
+    PUT_32BIT_MSB_FIRST(p, PROTOCOL_VERSION); p += 4;
+    PUT_32BIT_MSB_FIRST(p, ctx->our_nonce_len); p += 4;
+    memcpy(p, ctx->our_nonce, ctx->our_nonce_len); p += ctx->our_nonce_len;
+    PUT_32BIT_MSB_FIRST(p, SHA_LEN); p += 4;
+    doit_compute_secret_id(ctx, ctx->our_nonce, ctx->our_nonce_len, p);
+    p += SHA_LEN;
 
-    ctx->our_nonce_len = 4+SHA_LEN;
-    memcpy(ctx->our_nonce, buf, ctx->our_nonce_len);
-
-    *output_len = ctx->our_nonce_len;
+    *output_len = p - buf;
     return buf;
 }
 /*}}}*/
@@ -1471,72 +1517,92 @@ const char *doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
 {
     unsigned char *p = (unsigned char *)buf;
 
-    if (ctx->their_nonce_len == 0) {
-        /*
-         * We haven't started receiving their nonce yet. Accumulate
-         * length bytes in `incoming'.
-         */
-        while (len > 0 && ctx->incoming_pos < 4) {
+    if (!ctx->done_greeting) {
+        while (len > 0) {
             ctx->incoming[ctx->incoming_pos++] = *p;
             p++, len--;
-        }
-        if (ctx->incoming_pos == 4) {
-            ctx->their_nonce_len = 4+GET_32BIT_MSB_FIRST(ctx->incoming);
-            if (ctx->their_nonce_len > PACKET_MAX)
-                return "Remote sent overlarge nonce string";
-            ctx->their_nonce = malloc(ctx->their_nonce_len);
-            if (!ctx->their_nonce)
-                return "Out of memory";
-            PUT_32BIT_MSB_FIRST(ctx->their_nonce, ctx->their_nonce_len-4);
-            ctx->their_nonce_got = 4;
-        }
-        if (len == 0)
-            return NULL;
-    }
 
-    if (ctx->their_nonce_got < ctx->their_nonce_len) {
-        /*
-         * We haven't finished receiving their nonce yet.
-         * Accumulate nonce bytes in `their_nonce'.
-         */
-        while (len > 0 && ctx->their_nonce_got < ctx->their_nonce_len) {
-            ctx->their_nonce[ctx->their_nonce_got++] = *p;
-            p++, len--;
-        }
-        if (ctx->their_nonce_got == ctx->their_nonce_len) {
-            /*
-             * We have both nonces. Set up the keys.
-             */
-            unsigned char digest[SHA_LEN];
+            if (ctx->incoming_pos == 4) {
+                unsigned remote_version = GET_32BIT_MSB_FIRST(ctx->incoming);
+                if (remote_version != PROTOCOL_VERSION) {
+                    sprintf(ctx->errbuf, "Protocol version mismatch: "
+                            "our side %#x, their side %#x",
+                            (unsigned)PROTOCOL_VERSION, remote_version);
+                    return ctx->errbuf;
+                }
+            }
 
-            doit_makekey(ctx, 'K', OUTGOING, digest);
-            aes_setup(&ctx->outgoingK, AES_BLK, digest, 16);
-            doit_makekey(ctx, 'I', OUTGOING, digest);
-            aes_setiv(&ctx->outgoingK, digest);
+            if (ctx->incoming_pos == 8) {
+                ctx->their_nonce_len = GET_32BIT_MSB_FIRST(ctx->incoming + 4);
+                if (ctx->their_nonce_len > PACKET_MAX)
+                    return "Remote sent overlarge nonce string";
+            }
 
-            doit_makekey(ctx, 'K', INCOMING, digest);
-            aes_setup(&ctx->incomingK, AES_BLK, digest, 16);
-            doit_makekey(ctx, 'I', INCOMING, digest);
-            aes_setiv(&ctx->incomingK, digest);
+            if (ctx->incoming_pos >= 8 &&
+                ctx->incoming_pos == 8 + ctx->their_nonce_len) {
+                ctx->their_nonce = malloc(ctx->their_nonce_len);
+                if (!ctx->their_nonce)
+                    return "Out of memory";
+                memcpy(ctx->their_nonce, ctx->incoming + 8,
+                       ctx->their_nonce_len);
+            }
 
-            doit_makekey(ctx, 'M', OUTGOING, digest);
-            hmac_sha1_key(&ctx->outgoing1, &ctx->outgoing2, digest, 20);
+            if (ctx->incoming_pos >= 8 &&
+                ctx->incoming_pos == 12 + ctx->their_nonce_len) {
+                unsigned secret_id_len = GET_32BIT_MSB_FIRST(
+                    ctx->incoming + 8 + ctx->their_nonce_len);
+                if (secret_id_len != SHA_LEN)
+                    return "Remote secret-id was the wrong length";
+            }
 
-            doit_makekey(ctx, 'M', INCOMING, digest);
-            hmac_sha1_key(&ctx->incoming1, &ctx->incoming2, digest, 20);
+            if (ctx->incoming_pos >= 8 &&
+                ctx->incoming_pos == 12 + ctx->their_nonce_len + SHA_LEN) {
+                unsigned char real_secret_id[SHA_LEN];
+                doit_compute_secret_id(ctx, ctx->their_nonce,
+                                       ctx->their_nonce_len, real_secret_id);
+                if (memcmp(real_secret_id,
+                           ctx->incoming + 12 + ctx->their_nonce_len,
+                           SHA_LEN) != 0) {
+                    return "Remote shared secret does not match ours";
+                }
 
-            doit_makekey(ctx, 'p', OUTGOING, digest);
-            SHA_Init(&ctx->paddingH);
-            SHA_Bytes(&ctx->paddingH, digest, 20);
+                /*
+                 * Set up the keys.
+                 */
+                unsigned char digest[SHA_LEN];
 
-            memset(ctx->secret, 0, ctx->secret_len);
-            free(ctx->secret);
-            ctx->secret = NULL;
-            memset(ctx->their_nonce, 0, ctx->their_nonce_len);
-            free(ctx->their_nonce);
-            ctx->their_nonce = NULL;
-            memset(ctx->our_nonce, 0, ctx->our_nonce_len);
-            ctx->incoming_pos = 0;
+                doit_makekey(ctx, 'K', OUTGOING, digest);
+                aes_setup(&ctx->outgoingK, AES_BLK, digest, 16);
+                doit_makekey(ctx, 'I', OUTGOING, digest);
+                aes_setiv(&ctx->outgoingK, digest);
+
+                doit_makekey(ctx, 'K', INCOMING, digest);
+                aes_setup(&ctx->incomingK, AES_BLK, digest, 16);
+                doit_makekey(ctx, 'I', INCOMING, digest);
+                aes_setiv(&ctx->incomingK, digest);
+
+                doit_makekey(ctx, 'M', OUTGOING, digest);
+                hmac_sha1_key(&ctx->outgoing1, &ctx->outgoing2, digest, 20);
+
+                doit_makekey(ctx, 'M', INCOMING, digest);
+                hmac_sha1_key(&ctx->incoming1, &ctx->incoming2, digest, 20);
+
+                doit_makekey(ctx, 'p', OUTGOING, digest);
+                SHA_Init(&ctx->paddingH);
+                SHA_Bytes(&ctx->paddingH, digest, 20);
+
+                memset(ctx->secret, 0, ctx->secret_len);
+                free(ctx->secret);
+                ctx->secret = NULL;
+                memset(ctx->their_nonce, 0, ctx->their_nonce_len);
+                free(ctx->their_nonce);
+                ctx->their_nonce = NULL;
+                memset(ctx->our_nonce, 0, ctx->our_nonce_len);
+                ctx->incoming_pos = 0;
+
+                ctx->done_greeting = 1;
+                break;
+            }
         }
         if (len == 0)
             return NULL;
@@ -1624,8 +1690,7 @@ int doit_buffered(doit_ctx *ctx)
  */
 int doit_got_keys(doit_ctx *ctx) /*{{{*/
 {
-    return (ctx->their_nonce_len > 0 &&
-            ctx->their_nonce_got == ctx->their_nonce_len);
+    return ctx->done_greeting;
 }
 /*}}}*/
 
