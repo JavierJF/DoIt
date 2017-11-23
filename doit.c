@@ -804,6 +804,12 @@ void listener_cmdline(char *cmdline) {
             ports = malloc(sizeof(int));
             ports[0] = port;
             listener_ports = ports;
+        } else if (!strncmp(cmdline, "--about", 7) &&
+            (!cmdline[7] || isspace((unsigned char)cmdline[7]))) {
+            /* Just show the About box */
+	    DialogBox(listener_instance, MAKEINTRESOURCE(300),
+		      NULL, AboutProc);
+            exit(0);
         } else
             break;
     }
