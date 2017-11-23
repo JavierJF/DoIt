@@ -1337,7 +1337,7 @@ static void aes_decrypt_cbc(unsigned char *blk, int len, AESContext * ctx)
 #define AES_BLK 16
 #define PACKET_MAX 1024
 #define BUF_MOVE_THRESHOLD 1024
-#define PROTOCOL_VERSION 0x10002U
+#define PROTOCOL_VERSION 0x10003U
 #define ERROR_INDICATOR 0xFFFFFFFFUL
 /*}}}*/
 
@@ -1415,6 +1415,28 @@ static void doit_compute_mac(SHA_State *s1, SHA_State *s2,
     s = *s2;			       /* structure copy */
     SHA_Bytes(&s, intermediate, SHA_LEN);
     SHA_Final(&s, digest);
+}
+/*}}}*/
+
+static int doit_verify_mac(SHA_State *s1, SHA_State *s2,
+                           const unsigned char *expected_digest) /*{{{*/
+{
+    SHA_State s;
+    unsigned char intermediate[SHA_LEN];
+    unsigned char digest[SHA_LEN];
+    int i;
+    unsigned result;
+
+    s = *s1;			       /* structure copy */
+    SHA_Final(&s, intermediate);
+    s = *s2;			       /* structure copy */
+    SHA_Bytes(&s, intermediate, SHA_LEN);
+    SHA_Final(&s, digest);
+
+    result = 0;
+    for (i = 0; i < SHA_LEN; i++)
+        result |= digest[i] ^ expected_digest[i];
+    return (0x100 - result) >> 8;
 }
 /*}}}*/
 
@@ -1690,28 +1712,33 @@ const char *doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
              * We haven't decoded the first block yet. Accumulate
              * bytes in `incoming'.
              */
-            while (len > 0 && ctx->incoming_pos < AES_BLK) {
+            while (len > 0 && ctx->incoming_pos < AES_BLK + SHA_LEN) {
                 ctx->incoming[ctx->incoming_pos++] = *p;
                 p++, len--;
             }
-            if (ctx->incoming_pos == AES_BLK) {
+            if (ctx->incoming_pos == AES_BLK + SHA_LEN) {
+                /*
+                 * Verify and decrypt the initial packet.
+                 */
+                doit_add_mac(&ctx->incoming1, ctx->incoming, AES_BLK);
+                if (!doit_verify_mac(&ctx->incoming1, &ctx->incoming2,
+                                     ctx->incoming + AES_BLK))
+                    return "Incoming initial packet failed MAC validation";
                 aes_decrypt_cbc(ctx->incoming, AES_BLK, &ctx->incomingK);
-                doit_add_mac(&ctx->incoming1, ctx->incoming, 4);
                 ctx->packet_datalen = GET_32BIT_MSB_FIRST(ctx->incoming);
                 ctx->packet_padlen = ctx->incoming[4];
-                ctx->packet_len = 5 + ctx->packet_datalen +
-                    ctx->packet_padlen + SHA_LEN;
+                ctx->packet_len = 5 + ctx->packet_datalen + ctx->packet_padlen;
                 if (ctx->packet_datalen > PACKET_MAX ||
                     ctx->packet_padlen == 0 ||
-                    (ctx->packet_len - SHA_LEN) % AES_BLK != 0)
+                    ctx->packet_len % AES_BLK != 0)
                     return "First block of packet decrypted to garbage";
+                if (ctx->packet_len > AES_BLK)
+                    ctx->packet_len += SHA_LEN; /* include the second MAC */
                 ctx->packet = malloc(ctx->packet_len);
                 memcpy(ctx->packet, ctx->incoming, AES_BLK);
                 ctx->packet_pos = AES_BLK;
                 ctx->incoming_pos = 0;
             }
-            if (len == 0)
-                return NULL;
         }
 
         while (len > 0 && ctx->packet_pos < ctx->packet_len) {
@@ -1719,18 +1746,25 @@ const char *doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
             p++, len--;
         }
 
-        if (ctx->packet_pos == ctx->packet_len) {
-            unsigned char digest[SHA_LEN];
+        if (ctx->packet && ctx->packet_pos == ctx->packet_len) {
             int newbuffered;
-            aes_decrypt_cbc(ctx->packet + AES_BLK,
-                            ctx->packet_len - SHA_LEN - AES_BLK,
-                            &ctx->incomingK);
-            doit_add_mac(&ctx->incoming1,
-                         ctx->packet + 5, ctx->packet_datalen);
-            doit_compute_mac(&ctx->incoming1, &ctx->incoming2, digest);
-            if (0 != memcmp(ctx->packet + ctx->packet_len - SHA_LEN,
-                            digest, SHA_LEN))
-                return "MAC validation failure on incoming packet";
+
+            if (ctx->packet_len > AES_BLK) {
+                /*
+                 * Verify and decrypt the followup packet.
+                 */
+                assert(ctx->packet_len > AES_BLK + SHA_LEN);
+                ctx->packet_len -= SHA_LEN;
+                doit_add_mac(&ctx->incoming1,
+                             ctx->packet + AES_BLK, ctx->packet_len - AES_BLK);
+                if (!doit_verify_mac(&ctx->incoming1, &ctx->incoming2,
+                                     ctx->packet + ctx->packet_len))
+                    return "Incoming followup packet failed MAC validation";
+                aes_decrypt_cbc(ctx->packet + AES_BLK,
+                                ctx->packet_len - AES_BLK,
+                                &ctx->incomingK);
+            }
+
             newbuffered = ctx->buffered + ctx->packet_datalen;
             if (ctx->buffer)
                 ctx->buffer = realloc(ctx->buffer, newbuffered);
@@ -1743,6 +1777,9 @@ const char *doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
             free(ctx->packet);
             ctx->packet = NULL;
         }
+
+        if (len == 0)
+            return NULL;
     }
 
     return NULL;
@@ -1804,31 +1841,72 @@ void *doit_send(doit_ctx *ctx, void *buf, int len, int *output_len) /*{{{*/
 {
     unsigned char *ret, *pkt, *p = buf;
     int padding;
-    int pktlen, lensofar;
+    int pktlen, maclen, lensofar;
     int datalen;
 
     ret = NULL;
     lensofar = 0;
     while (len > 0) {
+        /*
+         * Compute the length of the data+padding chunk.
+         */
         datalen = len;
         if (datalen > PACKET_MAX)
             datalen = PACKET_MAX;
         padding = AES_BLK - ((datalen+5) % AES_BLK);
-        pktlen = 5 + datalen + padding + SHA_LEN;
+        pktlen = 5 + datalen + padding;
+        assert(pktlen % AES_BLK == 0);
+
+        /*
+         * Compute the length of the ciphertext+MAC packet(s) that
+         * will encode that chunk, by adding on 1 or 2 MAC lengths.
+         */
+        maclen = SHA_LEN;              /* always a MAC for initial packet */
+        if (pktlen > AES_BLK)
+            maclen += SHA_LEN;         /* maybe a MAC for followup packet */
+
+        /*
+         * Reserve space for those packet(s).
+         */
         if (ret == NULL)
-            ret = malloc(pktlen);
+            ret = malloc(pktlen + maclen);
         else
-            ret = realloc(ret, lensofar + pktlen);
+            ret = realloc(ret, lensofar + pktlen + maclen);
         pkt = ret + lensofar;
-        lensofar += pktlen;
+        lensofar += pktlen + maclen;
+
+        /*
+         * Encode the chunk.
+         */
         PUT_32BIT_MSB_FIRST(pkt, datalen);
         pkt[4] = padding;
         memcpy(pkt+5, p, datalen);
         doit_make_padding(ctx, pkt+5+datalen, padding);
-        doit_add_mac(&ctx->outgoing1, pkt, 4);
-        doit_add_mac(&ctx->outgoing1, pkt+5, datalen);
-        doit_compute_mac(&ctx->outgoing1, &ctx->outgoing2, pkt+pktlen-SHA_LEN);
-        aes_encrypt_cbc(pkt, pktlen - SHA_LEN, &ctx->outgoingK);
+
+        /*
+         * Split the data up at the first MAC boundary.
+         */
+        if (pktlen > AES_BLK)
+            memmove(pkt + AES_BLK + SHA_LEN, pkt + AES_BLK, pktlen - AES_BLK);
+
+        /*
+         * Encrypt and MAC the initial packet.
+         */
+        aes_encrypt_cbc(pkt, AES_BLK, &ctx->outgoingK);
+        doit_add_mac(&ctx->outgoing1, pkt, AES_BLK);
+        doit_compute_mac(&ctx->outgoing1, &ctx->outgoing2, pkt + AES_BLK);
+
+        if (pktlen > AES_BLK) {
+            /*
+             * Encrypt and MAC the followup packet.
+             */
+            aes_encrypt_cbc(pkt + AES_BLK + SHA_LEN, pktlen - AES_BLK,
+                            &ctx->outgoingK);
+            doit_add_mac(&ctx->outgoing1,
+                         pkt + AES_BLK + SHA_LEN, pktlen - AES_BLK);
+            doit_compute_mac(&ctx->outgoing1, &ctx->outgoing2,
+                             pkt + pktlen + SHA_LEN);
+        }
 
         len -= datalen;
         p += datalen;

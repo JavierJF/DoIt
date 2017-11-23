@@ -25,7 +25,7 @@ The normal protocol greeting is as follows:
   uint32                       secret-id-length
   data[secret-id-length]       secret-id
 
-The protocol-version described in this document is 0x10002.
+The protocol-version described in this document is 0x10003.
 
 The secret-id is a SHA-256 hash of the following data:
 
@@ -51,22 +51,54 @@ the situation where service is currently unavailable:
   data[message-length]         message
   uint32                       error-indicator = 0xFFFFFFFF
 
-All further communication takes place in binary packets. The packet
-format is
+All further communication takes place in binary packets with the
+following format:
 
-  uint32                       packet-length
-  byte                         packet-padding-length
-  data[packet-length]          packet-data
-  data[packet-padding-length]  packet-padding
-  data[20]                     MAC
+  data[ciphertext-length]      ciphertext
+  data[32]                     MAC
 
-(The packet-padding is random, at least one byte, and brings the
-total length of the packet-minus-MAC up to a multiple of the cipher
-block size.)
+in which the MAC is used to verify the encrypted packet-data (details
+below), and then the packet-data is decrypted after its MAC is
+validated. The 'ciphertext-length' for each packet is known in advance
+(see below), and is never transmitted explicitly.
 
-Everything except the MAC is encrypted, using 128-bit AES in CBC
-mode. The encryption key used on each side to encrypt outgoing data
-is the first 128 bits of a SHA-256 hash of the following:
+These ciphertext+MAC packets decrypt to a sequence of 'chunks', each
+with the following format:
+
+  uint32                       data-length
+  byte                         padding-length
+  data[data-length]            data
+  data[padding-length]         padding
+
+in which 'padding' is random, at least one byte long, and brings the
+total length of the block to a multiple of the cipher block size.
+
+A chunk is composed of either one or two binary packets. The first
+packet of a chunk always has ciphertext-length equal to the block size
+of the cipher. After verifying the MAC on that packet and decrypting
+it, the receiver obtains enough data to find out the total length of
+ciphertext in the packet _pair_ (namely 5 + data-length +
+padding-length). If this is equal to one cipher block, then the entire
+chunk is already complete, and was contained in the packet that has
+already been transmitted; if not, then a second packet is transmitted
+immediately afterwards, whose ciphertext-length is equal to the
+chunk's total length minus the one cipher block that was transmitted
+in the first packet.
+
+For example:
+
+  16-byte chunk   ->   initial packet with ciphertext-length 16
+                       no followup packet
+
+  32-byte chunk   ->   initial packet with ciphertext-length 16
+                       followup packet with ciphertext-length 16
+
+  48-byte chunk   ->   initial packet with ciphertext-length 16
+                       followup packet with ciphertext-length 32
+
+The packets' ciphertext is encrypted using 128-bit AES in CBC mode.
+The encryption key used on each side to encrypt outgoing data is the
+first 128 bits of a SHA-256 hash of the following:
 
   char                         "K"
   uint32                       shared-secret-length
@@ -84,17 +116,10 @@ outgoing encryption key).
 The IV is derived similarly, but uses "I" instead of "K" at the
 start.
 
-The MAC in each packet is an HMAC-SHA-256 of _all_ the plaintext that
-side has sent up to that point. That is, after two packets the MAC
-will cover the data
-
-  uint32                       packet-1-length
-  data[packet-1-length]        packet-1-data
-  uint32                       packet-2-length
-  data[packet-2-length]        packet-2-data
-
-and so on. The MAC key used by each side for outgoing data is a full
-256-bit SHA-256 hash of the following data:
+The MAC in each packet is an HMAC-SHA-256 of the concatenation of the
+ciphertext of _all_ packets in that direction, up to and including the
+one being verified. The MAC key used by each side for outgoing data is
+a full 256-bit SHA-256 hash of the following data:
 
   char                         "M"
   uint32                       shared-secret-length
