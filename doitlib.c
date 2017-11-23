@@ -1818,6 +1818,7 @@ int main(void) {
     int seclen = sizeof(secret) - 1;
     unsigned char *d1, *d2, last_nonce_chr;
     int i, len1, len2;
+    const char *err;
     char longpara[] =
         "This is quite a long paragraph, the aim of which is to exceed 1024\n"
         "characters and thus test the packet-splitting and packet-joining\n"
@@ -1852,9 +1853,11 @@ int main(void) {
      */
     d1 = doit_make_nonce(one, &len1);
     d2 = doit_make_nonce(two, &len2);
-    assert(0 == doit_incoming_data(two, d1, len1));
+    err = doit_incoming_data(two, d1, len1);
+    assert(!err);
     for (i = 0; i < len2-1; i++) {
-        assert(0 == doit_incoming_data(one, d2+i, 1));
+        err = doit_incoming_data(one, d2+i, 1);
+        assert(!err);
     }
     last_nonce_chr = d2[len2-1];
     free(d1);
@@ -1864,34 +1867,55 @@ int main(void) {
      * Exchange some data. Some in one lump, and some piece by
      * piece.
      */
-    d1 = doit_send(two, "hello?\n", 7, &len1);
-    assert(len1 > 7);
-    d2 = malloc(len1+1);
-    memcpy(d2+1, d1, len1);
-    d2[0] = last_nonce_chr;
-    assert(NULL == doit_incoming_data(one, d2, len1+1));
-    assert(7 == doit_buffered(one));
-    assert(7 == doit_read(one, d1, 7));
-    fwrite(d1, 1, 7, stdout);
-    free(d1);
-    free(d2);
-    d1 = doit_send(one, "hello, world\n", 13, &len1);
-    assert(len1 > 13);
-    assert(NULL == doit_incoming_data(two, d1, len1));
-    assert(13 == doit_buffered(two));
-    assert(13 == doit_read(two, d1, 13));
-    fwrite(d1, 1, 13, stdout);
-    free(d1);
-    d1 = doit_send(one, "hello, the same world again\n", 28, &len1);
-    assert(len1 > 28);
-    for (i = 0; i < len1-1; i++) {
-        assert(0 == doit_incoming_data(two, d1+i, 1));
+    {
+        char data[] = "hello?\n";
+        int datalen = strlen(data);
+        d1 = doit_send(two, data, datalen, &len1);
+        assert(len1 > datalen);
+        d2 = malloc(len1+1);
+        memcpy(d2+1, d1, len1);
+        d2[0] = last_nonce_chr;
+        err = doit_incoming_data(one, d2, len1+1);
+        assert(!err);
+        assert(doit_buffered(one) == datalen);
+        len1 = doit_read(one, d1, datalen);
+        assert(len1 == datalen);
+        assert(!memcmp(d1, data, datalen));
+        free(d1);
+        free(d2);
     }
-    assert(NULL == doit_incoming_data(two, d1+len1-1, 1));
-    assert(28 == doit_buffered(two));
-    assert(28 == doit_read(two, d1, 28));
-    fwrite(d1, 1, 28, stdout);
-    free(d1);
+
+    {
+        char data[] = "hello, world\n";
+        int datalen = strlen(data);
+        d1 = doit_send(one, data, datalen, &len1);
+        assert(len1 > datalen);
+        err = doit_incoming_data(two, d1, len1);
+        assert(!err);
+        assert(doit_buffered(two) == datalen);
+        len1 = doit_read(two, d1, datalen);
+        assert(len1 == datalen);
+        assert(!memcmp(d1, data, datalen));
+        free(d1);
+    }
+
+    {
+        char data[] = "hello, the same world again\n";
+        int datalen = strlen(data);
+        d1 = doit_send(one, data, datalen, &len1);
+        assert(len1 > datalen);
+        for (i = 0; i < len1-1; i++) {
+            err = doit_incoming_data(two, d1+i, 1);
+            assert(!err);
+        }
+        err = doit_incoming_data(two, d1+len1-1, 1);
+        assert(!err);
+        assert(doit_buffered(two) == datalen);
+        len1 = doit_read(two, d1, datalen);
+        assert(len1 == datalen);
+        assert(!memcmp(d1, data, datalen));
+        free(d1);
+    }
 
     /*
      * Finally, ensure we can deal with a packet boundary within a
@@ -1900,12 +1924,18 @@ int main(void) {
      */
     d1 = doit_send(two, longpara, longlen, &len1);
     assert(len1 > longlen);
-    assert(NULL == doit_incoming_data(one, d1, len1));
-    assert(longlen == doit_buffered(one));
-    assert(longlen == doit_read(one, d1, longlen));
-    fwrite(d1, 1, longlen, stdout);
+    err = doit_incoming_data(one, d1, len1);
+    assert(!err);
+    assert(doit_buffered(one) == longlen);
+    len1 = doit_read(one, d1, longlen);
+    assert(len1 == longlen);
+    assert(!memcmp(d1, longpara, longlen));
     free(d1);
 
+    doit_free_ctx(one);
+    doit_free_ctx(two);
+
+    printf("protocol test ok\n");
     return 0;
 }
 
