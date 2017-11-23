@@ -1282,50 +1282,43 @@ static void aes_decrypt(AESContext * ctx, uint32_t * block)
     ctx->decrypt(ctx, block);
 }
 
-static void aes_encrypt_cbc(unsigned char *blk, int len, AESContext * ctx)
+static void aes_ctr(unsigned char *blk, int len, AESContext * ctx)
 {
-    uint32_t iv[4];
+    uint32_t ctr_plain[4], ctr_cipher[4];
     int i;
 
     assert((len & 15) == 0);
 
-    memcpy(iv, ctx->iv, sizeof(iv));
+    memcpy(ctr_plain, ctx->iv, sizeof(ctr_plain));
 
     while (len > 0) {
-	for (i = 0; i < 4; i++)
-	    iv[i] ^= GET_32BIT_MSB_FIRST(blk + 4 * i);
-	aes_encrypt(ctx, iv);
-	for (i = 0; i < 4; i++)
-	    PUT_32BIT_MSB_FIRST(blk + 4 * i, iv[i]);
-	blk += 16;
-	len -= 16;
-    }
-
-    memcpy(ctx->iv, iv, sizeof(iv));
-}
-
-static void aes_decrypt_cbc(unsigned char *blk, int len, AESContext * ctx)
-{
-    uint32_t iv[4], x[4], ct[4];
-    int i;
-
-    assert((len & 15) == 0);
-
-    memcpy(iv, ctx->iv, sizeof(iv));
-
-    while (len > 0) {
-	for (i = 0; i < 4; i++)
-	    x[i] = ct[i] = GET_32BIT_MSB_FIRST(blk + 4 * i);
-	aes_decrypt(ctx, x);
+        memcpy(ctr_cipher, ctr_plain, sizeof(ctr_plain));
+	aes_encrypt(ctx, ctr_cipher);
 	for (i = 0; i < 4; i++) {
-	    PUT_32BIT_MSB_FIRST(blk + 4 * i, iv[i] ^ x[i]);
-	    iv[i] = ct[i];
-	}
+	    uint32_t word = GET_32BIT_MSB_FIRST(blk + 4 * i);
+            word ^= ctr_cipher[i];
+	    PUT_32BIT_MSB_FIRST(blk + 4 * i, word);
+        }
+        {
+            uint64_t carry = 1;
+            carry += ctr_plain[3];
+            ctr_plain[3] = (uint32_t)carry;
+            carry >>= 32;
+            carry += ctr_plain[2];
+            ctr_plain[2] = (uint32_t)carry;
+            carry >>= 32;
+            carry += ctr_plain[1];
+            ctr_plain[1] = (uint32_t)carry;
+            carry >>= 32;
+            carry += ctr_plain[0];
+            ctr_plain[0] = (uint32_t)carry;
+            carry >>= 32;
+        }
 	blk += 16;
 	len -= 16;
     }
 
-    memcpy(ctx->iv, iv, sizeof(iv));
+    memcpy(ctx->iv, ctr_plain, sizeof(ctr_plain));
 }
 
 /*}}}*/
@@ -1337,7 +1330,7 @@ static void aes_decrypt_cbc(unsigned char *blk, int len, AESContext * ctx)
 #define AES_BLK 16
 #define PACKET_MAX 1024
 #define BUF_MOVE_THRESHOLD 1024
-#define PROTOCOL_VERSION 0x10003U
+#define PROTOCOL_VERSION 0x10004U
 #define ERROR_INDICATOR 0xFFFFFFFFUL
 /*}}}*/
 
@@ -1724,7 +1717,7 @@ const char *doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
                 if (!doit_verify_mac(&ctx->incoming1, &ctx->incoming2,
                                      ctx->incoming + AES_BLK))
                     return "Incoming initial packet failed MAC validation";
-                aes_decrypt_cbc(ctx->incoming, AES_BLK, &ctx->incomingK);
+                aes_ctr(ctx->incoming, AES_BLK, &ctx->incomingK);
                 ctx->packet_datalen = GET_32BIT_MSB_FIRST(ctx->incoming);
                 ctx->packet_padlen = ctx->incoming[4];
                 ctx->packet_len = 5 + ctx->packet_datalen + ctx->packet_padlen;
@@ -1760,9 +1753,8 @@ const char *doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
                 if (!doit_verify_mac(&ctx->incoming1, &ctx->incoming2,
                                      ctx->packet + ctx->packet_len))
                     return "Incoming followup packet failed MAC validation";
-                aes_decrypt_cbc(ctx->packet + AES_BLK,
-                                ctx->packet_len - AES_BLK,
-                                &ctx->incomingK);
+                aes_ctr(ctx->packet + AES_BLK, ctx->packet_len - AES_BLK,
+                        &ctx->incomingK);
             }
 
             newbuffered = ctx->buffered + ctx->packet_datalen;
@@ -1892,7 +1884,7 @@ void *doit_send(doit_ctx *ctx, void *buf, int len, int *output_len) /*{{{*/
         /*
          * Encrypt and MAC the initial packet.
          */
-        aes_encrypt_cbc(pkt, AES_BLK, &ctx->outgoingK);
+        aes_ctr(pkt, AES_BLK, &ctx->outgoingK);
         doit_add_mac(&ctx->outgoing1, pkt, AES_BLK);
         doit_compute_mac(&ctx->outgoing1, &ctx->outgoing2, pkt + AES_BLK);
 
@@ -1900,8 +1892,8 @@ void *doit_send(doit_ctx *ctx, void *buf, int len, int *output_len) /*{{{*/
             /*
              * Encrypt and MAC the followup packet.
              */
-            aes_encrypt_cbc(pkt + AES_BLK + SHA_LEN, pktlen - AES_BLK,
-                            &ctx->outgoingK);
+            aes_ctr(pkt + AES_BLK + SHA_LEN, pktlen - AES_BLK,
+                    &ctx->outgoingK);
             doit_add_mac(&ctx->outgoing1,
                          pkt + AES_BLK + SHA_LEN, pktlen - AES_BLK);
             doit_compute_mac(&ctx->outgoing1, &ctx->outgoing2,
