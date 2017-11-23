@@ -16,7 +16,7 @@ BEGIN
     PUSHBUTTON "View &Licence", 112, 6, 52, 70, 14
     CTEXT "DoIt", 110, 10, 6, 120, 8
     CTEXT "", 100, 10, 16, 120, 16
-    CTEXT "\251 1997-2001 Simon Tatham. All rights reserved.",
+    CTEXT "\251 2000-2001 Simon Tatham. All rights reserved.",
           111, 10, 34, 120, 16
 END
 
