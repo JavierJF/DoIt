@@ -1477,22 +1477,12 @@ void doit_free_ctx(doit_ctx *ctx) /*{{{*/
 /*}}}*/
 
 /*
- * Add perturbation data for nonce generation.
- */
-void doit_perturb_nonce(doit_ctx *ctx, void *data, int len) /*{{{*/
-{
-    SHA_Bytes(&ctx->nonceH, data, len);
-}
-/*}}}*/
-
-/*
  * Construct a nonce and return a ready-to-send buffer containing
  * it. Returns the length of the data to send. The buffer should be
  * freed after sending.
  */
 void *doit_make_nonce(doit_ctx *ctx, int *output_len) /*{{{*/
 {
-    time_t t = time(NULL);
     unsigned char digest[SHA_LEN];
     unsigned char *buf, *p;
 
@@ -1508,7 +1498,19 @@ void *doit_make_nonce(doit_ctx *ctx, int *output_len) /*{{{*/
         memcpy(p, service_unavailable_msg, msglen); p += msglen;
         PUT_32BIT_MSB_FIRST(p, ERROR_INDICATOR); p += 4;
     } else {
-        SHA_Bytes(&ctx->nonceH, &t, sizeof(t));
+        unsigned preimage_words[NONCE_MAX_PREIMAGE_WORDS];
+        int i, nwords;
+
+        nwords = get_nonce_preimage(preimage_words);
+        if (nwords == 0)
+            preimage_words[nwords++] = time(NULL); /* fallback */
+
+        for (i = 0; i < nwords; i++) {
+            unsigned char wordbuf[4];
+            PUT_32BIT_MSB_FIRST(wordbuf, preimage_words[i]);
+            SHA_Bytes(&ctx->nonceH, wordbuf, 4);
+        }
+
         SHA_Final(&ctx->nonceH, ctx->our_nonce);
         ctx->our_nonce_len = SHA_LEN;
 

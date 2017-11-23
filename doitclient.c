@@ -550,6 +550,20 @@ void set_dir(int sock, doit_ctx *ctx, int verbose)
     free(path);
 }
 
+int get_nonce_preimage(unsigned *words)
+{
+    struct timeval tv;
+    int n = 0;
+
+    words[n++] = 0x636C6965;           /* "clie", short for "client" */
+    words[n++] = getpid();
+    gettimeofday(&tv, NULL);
+    words[n++] = tv.tv_sec;
+    words[n++] = tv.tv_usec;
+
+    return n;
+}
+
 int main(int argc, char **argv)
 {
     int sock;
@@ -990,11 +1004,6 @@ int main(int argc, char **argv)
         if (verbose)
             fprintf(stderr, "doit: made connection\n");
 
-        doit_perturb_nonce(ctx, "client", 6);
-        {
-            int pid = getpid();
-            doit_perturb_nonce(ctx, &pid, sizeof(pid));
-        }
         data = doit_make_nonce(ctx, &len);
 
         while (!doit_got_keys(ctx)) {

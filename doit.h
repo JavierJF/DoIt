@@ -8,6 +8,8 @@ typedef struct doit_ctx_tag doit_ctx;
 
 #define NONCE_MAX_LEN 64
 
+#define NONCE_MAX_PREIMAGE_WORDS 16
+
 /*
  * Set up a crypto context.
  */
@@ -19,9 +21,11 @@ doit_ctx *doit_init_ctx(void *secret, int secret_len);
 void doit_free_ctx(doit_ctx *ctx);
 
 /*
- * Add perturbation data for nonce generation.
+ * Provided by the doitlib.c client application: provide words of data
+ * to use for nonce generation. Returns the number of words written
+ * into the buffer, which must be at most NONCE_MAX_PREIMAGE_WORDS.
  */
-void doit_perturb_nonce(doit_ctx *ctx, void *data, int len);
+int get_nonce_preimage(unsigned *words);
 
 /*
  * Construct a nonce and return a ready-to-send buffer containing

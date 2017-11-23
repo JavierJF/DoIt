@@ -491,6 +491,23 @@ int do_doit_send_mb(SOCKET sock, doit_ctx *ctx, struct msgbuf *mb)
         return do_doit_send_str(sock, ctx, "-out of memory in msgbuf\n");
 }
 
+int get_nonce_preimage(unsigned *words)
+{
+    FILETIME ft;
+    int n = 0;
+    static unsigned counter = 0;
+
+    words[n++] = 0x73657276;           /* "serv", short for "server" */
+    words[n++] = GetCurrentProcessId();
+    words[n++] = GetCurrentThreadId();
+    GetSystemTimeAsFileTime(&ft);
+    words[n++] = ft.dwHighDateTime;
+    words[n++] = ft.dwLowDateTime;
+    words[n++] = counter++;            /* different per connection */
+
+    return n;
+}
+
 /*
  * Export the function that handles a connection.
  */
@@ -510,10 +527,6 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
     if (!ctx)
         goto done;
 
-    doit_perturb_nonce(ctx, "server", 6);
-    doit_perturb_nonce(ctx, &remoteaddr, sizeof(remoteaddr));
-    threadid = GetCurrentThreadId();
-    doit_perturb_nonce(ctx, &threadid, sizeof(threadid));
     nonce = doit_make_nonce(ctx, &len);
     if (do_send(sock, nonce, len) != len)
         goto done;
