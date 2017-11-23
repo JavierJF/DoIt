@@ -55,7 +55,6 @@ static char *secret;
 static int secretlen;
 static char *secretname;
 static int secret_reload;
-static char dummy_secret[1] = { '\0' };
 
 /*
  * Export the application name.
@@ -119,7 +118,8 @@ void msgbuf_append_win_error(struct msgbuf *mb, unsigned error)
                                (unsigned int)GetLastError());
         } else {
             mb->len += strlen(ptr);
-            if (ptr[0] && mb->buf[mb->len - 1] == '\n')
+            while (ptr[0] && (mb->buf[mb->len - 1] == '\n' ||
+                              mb->buf[mb->len - 1] == '\r'))
                 mb->len--;
         }
     }
@@ -130,27 +130,57 @@ void msgbuf_getlasterror(struct msgbuf *mb)
     msgbuf_append_win_error(mb, GetLastError());
 }
 
+const char *msgbuf_sz(struct msgbuf *mb)
+{
+    char *endptr = msgbuf_endptr(mb, 1);
+    if (!endptr)
+        return NULL;
+    *endptr = '\0';
+    return mb->buf;
+}
+
+static void load_secret_failure(const char *msg)
+{
+    if (secret)
+	free(secret);
+
+    secretlen = 0;
+    secret = NULL;
+
+    if (!msg)
+        msg = "[Error message unavailable: out of memory]";
+
+    MessageBox(listener_hwnd, msg, "DoIt shared secret error",
+               MB_OK | MB_ICONERROR);
+}
+
 /*
  * Load the secret out of a file.
  */
 static void load_secret(void) {
     FILE *fp;
+    struct msgbuf amb = { NULL, 0, 0 }, *mb = &amb;
 
-    if (secret && secret != dummy_secret)
+    if (secret)
 	free(secret);
 
     fp = fopen(secretname, "rb");
     if (!fp) {
-        secretlen = 0;
-        secret = dummy_secret;
+        msgbuf_append(mb, "Unable to open \"");
+        msgbuf_append(mb, secretname);
+        msgbuf_append(mb, "\": ");
+        msgbuf_getlasterror(mb);
+        load_secret_failure(msgbuf_sz(mb));
         return;
     }
     fseek(fp, 0, SEEK_END);
     secretlen = ftell(fp);
     secret = malloc(secretlen);
     if (!secret) {
-        secretlen = 0;
-        secret = dummy_secret;
+        msgbuf_append(mb, "Out of memory for shared secret");
+        msgbuf_getlasterror(mb);
+        load_secret_failure(msgbuf_sz(mb));
+        return;
     }
     fseek(fp, 0, SEEK_SET);
     fread(secret, 1, secretlen, fp);
@@ -473,7 +503,7 @@ int listener_newthread(SOCKET sock, int port, SOCKADDR_IN remoteaddr) {
     DWORD threadid;
     struct msgbuf amb = { NULL, 0, 0 }, *mb = &amb;
 
-    if (secret_reload)
+    if (secret_reload || !secret)
 	load_secret();
 
     ctx = doit_init_ctx(secret, secretlen);

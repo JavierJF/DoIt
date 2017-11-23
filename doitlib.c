@@ -15,6 +15,7 @@
  */
 
 #include <time.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1294,7 +1295,8 @@ static void aes_decrypt_cbc(unsigned char *blk, int len, AESContext * ctx)
 #define AES_BLK 16
 #define PACKET_MAX 1024
 #define BUF_MOVE_THRESHOLD 1024
-#define PROTOCOL_VERSION 0x10000U
+#define PROTOCOL_VERSION 0x10001U
+#define ERROR_INDICATOR 0xFFFFFFFFUL
 /*}}}*/
 
 /*{{{ doit_ctx structure itself */
@@ -1435,9 +1437,14 @@ doit_ctx *doit_init_ctx(void *secret, int secret_len) /*{{{*/
     doit_ctx *ctx;
 
     ctx = malloc(sizeof(doit_ctx));
-    ctx->secret = malloc(secret_len);
-    memcpy(ctx->secret, secret, secret_len);
-    ctx->secret_len = secret_len;
+    if (!secret) {
+        ctx->secret = NULL;
+        ctx->secret_len = 0;
+    } else {
+        ctx->secret = malloc(secret_len);
+        memcpy(ctx->secret, secret, secret_len);
+        ctx->secret_len = secret_len;
+    }
     ctx->their_nonce = NULL;
     ctx->their_nonce_len = 0;
     ctx->done_greeting = 0;
@@ -1489,18 +1496,31 @@ void *doit_make_nonce(doit_ctx *ctx, int *output_len) /*{{{*/
     unsigned char digest[SHA_LEN];
     unsigned char *buf, *p;
 
-    SHA_Bytes(&ctx->nonceH, &t, sizeof(t));
-    SHA_Final(&ctx->nonceH, ctx->our_nonce);
-    ctx->our_nonce_len = SHA_LEN;
+    if (!ctx->secret) {
+        static const char service_unavailable_msg[] =
+            "The DoIt service at this address is not currently available.";
+        int msglen = strlen(service_unavailable_msg);
 
-    buf = malloc(4 + 4 + ctx->our_nonce_len + 4 + SHA_LEN);
-    p = buf;
-    PUT_32BIT_MSB_FIRST(p, PROTOCOL_VERSION); p += 4;
-    PUT_32BIT_MSB_FIRST(p, ctx->our_nonce_len); p += 4;
-    memcpy(p, ctx->our_nonce, ctx->our_nonce_len); p += ctx->our_nonce_len;
-    PUT_32BIT_MSB_FIRST(p, SHA_LEN); p += 4;
-    doit_compute_secret_id(ctx, ctx->our_nonce, ctx->our_nonce_len, p);
-    p += SHA_LEN;
+        buf = malloc(12 + msglen);
+        p = buf;
+        PUT_32BIT_MSB_FIRST(p, PROTOCOL_VERSION); p += 4;
+        PUT_32BIT_MSB_FIRST(p, msglen); p += 4;
+        memcpy(p, service_unavailable_msg, msglen); p += msglen;
+        PUT_32BIT_MSB_FIRST(p, ERROR_INDICATOR); p += 4;
+    } else {
+        SHA_Bytes(&ctx->nonceH, &t, sizeof(t));
+        SHA_Final(&ctx->nonceH, ctx->our_nonce);
+        ctx->our_nonce_len = SHA_LEN;
+
+        buf = malloc(4 + 4 + ctx->our_nonce_len + 4 + SHA_LEN);
+        p = buf;
+        PUT_32BIT_MSB_FIRST(p, PROTOCOL_VERSION); p += 4;
+        PUT_32BIT_MSB_FIRST(p, ctx->our_nonce_len); p += 4;
+        memcpy(p, ctx->our_nonce, ctx->our_nonce_len); p += ctx->our_nonce_len;
+        PUT_32BIT_MSB_FIRST(p, SHA_LEN); p += 4;
+        doit_compute_secret_id(ctx, ctx->our_nonce, ctx->our_nonce_len, p);
+        p += SHA_LEN;
+    }
 
     *output_len = p - buf;
     return buf;
@@ -1551,6 +1571,13 @@ const char *doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
                 ctx->incoming_pos == 12 + ctx->their_nonce_len) {
                 unsigned secret_id_len = GET_32BIT_MSB_FIRST(
                     ctx->incoming + 8 + ctx->their_nonce_len);
+                if (secret_id_len == ERROR_INDICATOR) {
+                    sprintf(ctx->errbuf, "Remote refused service: %.*s",
+                            (ctx->their_nonce_len > 512 ?
+                             512 : ctx->their_nonce_len),
+                            ctx->their_nonce);
+                    return ctx->errbuf;
+                }
                 if (secret_id_len != SHA_LEN)
                     return "Remote secret-id was the wrong length";
             }

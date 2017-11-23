@@ -17,13 +17,15 @@ not be truly random or unpredictable, just (probabilistically)
 unique to prevent replay attacks. An adequate way to compute a nonce
 would be to hash the current time.
 
+The normal protocol greeting is as follows:
+
   uint32                       protocol-version
   uint32                       nonce-length
   data[nonce-length]           nonce
   uint32                       secret-id-length
   data[secret-id-length]       secret-id
 
-The protocol-version described in this document is 0x10000.
+The protocol-version described in this document is 0x10001.
 
 The secret-id is a SHA-1 hash of the following data:
 
@@ -40,6 +42,14 @@ and the secret-preid in turn is a SHA-1 hash of the following data:
   data[nonce-length]           nonce
   uint32                       shared-secret-length
   data[shared-secret-length]   shared-secret
+
+There is an alternative server-side protocol greeting available, for
+the situation where service is currently unavailable:
+
+  uint32                       protocol-version
+  uint32                       message-length
+  data[message-length]         message
+  uint32                       error-indicator = 0xFFFFFFFF
 
 All further communication takes place in binary packets. The packet
 format is
