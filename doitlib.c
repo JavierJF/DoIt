@@ -22,84 +22,119 @@
 
 #include "doit.h"
 
-/*{{{ SHA-1 implementation */
-
-typedef struct {
-    uint32_t h[5];
-} SHA_Core_State;
-
-#define SHA_BLKSIZE 64
-
-typedef struct {
-    SHA_Core_State core;
-    unsigned char block[SHA_BLKSIZE];
-    int blkused;
-    uint32_t lenhi, lenlo;
-} SHA_State;
-
-/* ----------------------------------------------------------------------
- * Core SHA algorithm: processes 16-word blocks into a message digest.
+/*{{{ SHA-2 implementation */
+/*
+ * SHA-256 algorithm as described at
+ *
+ *   http://csrc.nist.gov/cryptval/shs.html
  */
 
-#define rol(x,y) ( ((x) << (y)) | (((uint32_t)x) >> (32-y)) )
+/* ----------------------------------------------------------------------
+ * Core SHA256 algorithm: processes 16-word blocks into a message digest.
+ */
 
-void SHA_Core_Init(SHA_Core_State *s) {
-    s->h[0] = 0x67452301;
-    s->h[1] = 0xefcdab89;
-    s->h[2] = 0x98badcfe;
-    s->h[3] = 0x10325476;
-    s->h[4] = 0xc3d2e1f0;
+#define ror(x,y) ( ((x) << (32-y)) | (((uint32_t)(x)) >> (y)) )
+#define shr(x,y) ( (((uint32_t)(x)) >> (y)) )
+#define Ch(x,y,z) ( ((x) & (y)) ^ (~(x) & (z)) )
+#define Maj(x,y,z) ( ((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)) )
+#define bigsigma0(x) ( ror((x),2) ^ ror((x),13) ^ ror((x),22) )
+#define bigsigma1(x) ( ror((x),6) ^ ror((x),11) ^ ror((x),25) )
+#define smallsigma0(x) ( ror((x),7) ^ ror((x),18) ^ shr((x),3) )
+#define smallsigma1(x) ( ror((x),17) ^ ror((x),19) ^ shr((x),10) )
+
+typedef struct {
+    uint32_t h[8];
+} SHA256_Core_State;
+
+static void SHA256_Core_Init(SHA256_Core_State *s) {
+    s->h[0] = 0x6a09e667;
+    s->h[1] = 0xbb67ae85;
+    s->h[2] = 0x3c6ef372;
+    s->h[3] = 0xa54ff53a;
+    s->h[4] = 0x510e527f;
+    s->h[5] = 0x9b05688c;
+    s->h[6] = 0x1f83d9ab;
+    s->h[7] = 0x5be0cd19;
 }
 
-void SHA_Block(SHA_Core_State *s, uint32_t *block) {
+static void SHA256_Block(SHA256_Core_State *s, uint32_t *block) {
     uint32_t w[80];
-    uint32_t a,b,c,d,e;
+    uint32_t a,b,c,d,e,f,g,h;
+    static const int k[] = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+        0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+        0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+        0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+        0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    };
+
     int t;
 
     for (t = 0; t < 16; t++)
         w[t] = block[t];
 
-    for (t = 16; t < 80; t++) {
-        uint32_t tmp = w[t-3] ^ w[t-8] ^ w[t-14] ^ w[t-16];
-        w[t] = rol(tmp, 1);
+    for (t = 16; t < 64; t++)
+        w[t] = smallsigma1(w[t-2]) + w[t-7] + smallsigma0(w[t-15]) + w[t-16];
+
+    a = s->h[0]; b = s->h[1]; c = s->h[2]; d = s->h[3];
+    e = s->h[4]; f = s->h[5]; g = s->h[6]; h = s->h[7];
+
+    for (t = 0; t < 64; t+=8) {
+        uint32_t t1, t2;
+
+#define ROUND(j,a,b,c,d,e,f,g,h)                                \
+        t1 = h + bigsigma1(e) + Ch(e,f,g) + k[j] + w[j];        \
+        t2 = bigsigma0(a) + Maj(a,b,c);                         \
+        d = d + t1; h = t1 + t2;
+
+        ROUND(t+0, a,b,c,d,e,f,g,h);
+        ROUND(t+1, h,a,b,c,d,e,f,g);
+        ROUND(t+2, g,h,a,b,c,d,e,f);
+        ROUND(t+3, f,g,h,a,b,c,d,e);
+        ROUND(t+4, e,f,g,h,a,b,c,d);
+        ROUND(t+5, d,e,f,g,h,a,b,c);
+        ROUND(t+6, c,d,e,f,g,h,a,b);
+        ROUND(t+7, b,c,d,e,f,g,h,a);
     }
 
-    a = s->h[0]; b = s->h[1]; c = s->h[2]; d = s->h[3]; e = s->h[4];
-
-    for (t = 0; t < 20; t++) {
-        uint32_t tmp = rol(a, 5) + ( (b&c) | (d&~b) ) + e + w[t] + 0x5a827999;
-        e = d; d = c; c = rol(b, 30); b = a; a = tmp;
-    }
-    for (t = 20; t < 40; t++) {
-        uint32_t tmp = rol(a, 5) + (b^c^d) + e + w[t] + 0x6ed9eba1;
-        e = d; d = c; c = rol(b, 30); b = a; a = tmp;
-    }
-    for (t = 40; t < 60; t++) {
-        uint32_t tmp = rol(a, 5) + ( (b&c) | (b&d) | (c&d) ) + e + w[t] + 0x8f1bbcdc;
-        e = d; d = c; c = rol(b, 30); b = a; a = tmp;
-    }
-    for (t = 60; t < 80; t++) {
-        uint32_t tmp = rol(a, 5) + (b^c^d) + e + w[t] + 0xca62c1d6;
-        e = d; d = c; c = rol(b, 30); b = a; a = tmp;
-    }
-
-    s->h[0] += a; s->h[1] += b; s->h[2] += c; s->h[3] += d; s->h[4] += e;
+    s->h[0] += a; s->h[1] += b; s->h[2] += c; s->h[3] += d;
+    s->h[4] += e; s->h[5] += f; s->h[6] += g; s->h[7] += h;
 }
 
 /* ----------------------------------------------------------------------
- * Outer SHA algorithm: take an arbitrary length byte string,
+ * Outer SHA256 algorithm: take an arbitrary length byte string,
  * convert it into 16-word blocks with the prescribed padding at
- * the end, and pass those blocks to the core SHA algorithm.
+ * the end, and pass those blocks to the core SHA256 algorithm.
  */
 
+#define BLKSIZE 64
+
+typedef struct {
+    SHA256_Core_State core;
+    unsigned char block[BLKSIZE];
+    int blkused;
+    uint32_t lenhi, lenlo;
+} SHA_State;
+
 void SHA_Init(SHA_State *s) {
-    SHA_Core_Init(&s->core);
+    SHA256_Core_Init(&s->core);
     s->blkused = 0;
     s->lenhi = s->lenlo = 0;
 }
 
 void SHA_Bytes(SHA_State *s, const void *p, int len) {
-    const unsigned char *q = (const unsigned char *)p;
+    unsigned char *q = (unsigned char *)p;
     uint32_t wordblock[16];
     uint32_t lenw = len;
     int i;
@@ -110,7 +145,7 @@ void SHA_Bytes(SHA_State *s, const void *p, int len) {
     s->lenlo += lenw;
     s->lenhi += (s->lenlo < lenw);
 
-    if (s->blkused && s->blkused+len < SHA_BLKSIZE) {
+    if (s->blkused && s->blkused+len < BLKSIZE) {
         /*
          * Trivial case: just add to the block.
          */
@@ -120,10 +155,10 @@ void SHA_Bytes(SHA_State *s, const void *p, int len) {
         /*
          * We must complete and process at least one block.
          */
-        while (s->blkused + len >= SHA_BLKSIZE) {
-            memcpy(s->block + s->blkused, q, SHA_BLKSIZE - s->blkused);
-            q += SHA_BLKSIZE - s->blkused;
-            len -= SHA_BLKSIZE - s->blkused;
+        while (s->blkused + len >= BLKSIZE) {
+            memcpy(s->block + s->blkused, q, BLKSIZE - s->blkused);
+            q += BLKSIZE - s->blkused;
+            len -= BLKSIZE - s->blkused;
             /* Now process the block. Gather bytes big-endian into words */
             for (i = 0; i < 16; i++) {
                 wordblock[i] =
@@ -132,7 +167,7 @@ void SHA_Bytes(SHA_State *s, const void *p, int len) {
                     ( ((uint32_t)s->block[i*4+2]) <<  8 ) |
                     ( ((uint32_t)s->block[i*4+3]) <<  0 );
             }
-            SHA_Block(&s->core, wordblock);
+            SHA256_Block(&s->core, wordblock);
             s->blkused = 0;
         }
         memcpy(s->block, q, len);
@@ -140,10 +175,11 @@ void SHA_Bytes(SHA_State *s, const void *p, int len) {
     }
 }
 
-void SHA_Final(SHA_State *s, unsigned char *output) {
+void SHA_Final(SHA_State *s, void *output) {
     int i;
     int pad;
     unsigned char c[64];
+    unsigned char *digest = (unsigned char *)output;
     uint32_t lenhi, lenlo;
 
     if (s->blkused >= 56)
@@ -169,19 +205,26 @@ void SHA_Final(SHA_State *s, unsigned char *output) {
 
     SHA_Bytes(s, &c, 8);
 
-    for (i = 0; i < 5; i++) {
-        output[4*i+0] = (unsigned char) ((s->core.h[i] >> 24) & 0xFF);
-        output[4*i+1] = (unsigned char) ((s->core.h[i] >> 16) & 0xFF);
-        output[4*i+2] = (unsigned char) ((s->core.h[i] >>  8) & 0xFF);
-        output[4*i+3] = (unsigned char) ((s->core.h[i] >>  0) & 0xFF);
+    for (i = 0; i < 8; i++) {
+        digest[i*4+0] = (s->core.h[i] >> 24) & 0xFF;
+        digest[i*4+1] = (s->core.h[i] >> 16) & 0xFF;
+        digest[i*4+2] = (s->core.h[i] >>  8) & 0xFF;
+        digest[i*4+3] = (s->core.h[i] >>  0) & 0xFF;
     }
 }
 
-/*}}}*/
-/*{{{ HMAC-SHA-1 implementation */
+void SHA_Simple(const void *p, int len, unsigned char *output) {
+    SHA_State s;
 
-static void hmac_sha1_key(SHA_State * s1, SHA_State * s2,
-                          unsigned char *key, int len)
+    SHA_Init(&s);
+    SHA_Bytes(&s, p, len);
+    SHA_Final(&s, output);
+}
+/*}}}*/
+/*{{{ HMAC-SHA implementation */
+
+static void hmac_sha_key(SHA_State * s1, SHA_State * s2,
+                         unsigned char *key, int len)
 {
     unsigned char foo[64];
     int i;
@@ -198,7 +241,7 @@ static void hmac_sha1_key(SHA_State * s1, SHA_State * s2,
     SHA_Init(s2);
     SHA_Bytes(s2, foo, 64);
 
-    memset(foo, 0, 64);		       /* burn the evidence */
+    memset(foo, 0, 64);                       /* burn the evidence */
 }
 
 /*}}}*/
@@ -1290,11 +1333,11 @@ static void aes_decrypt_cbc(unsigned char *blk, int len, AESContext * ctx)
 /*{{{ #definitions */
 #define OUTGOING 1
 #define INCOMING 2
-#define SHA_LEN 20
+#define SHA_LEN 32
 #define AES_BLK 16
 #define PACKET_MAX 1024
 #define BUF_MOVE_THRESHOLD 1024
-#define PROTOCOL_VERSION 0x10001U
+#define PROTOCOL_VERSION 0x10002U
 #define ERROR_INDICATOR 0xFFFFFFFFUL
 /*}}}*/
 
@@ -1365,7 +1408,7 @@ static void doit_compute_mac(SHA_State *s1, SHA_State *s2,
                              unsigned char *digest) /*{{{*/
 {
     SHA_State s;
-    unsigned char intermediate[20];
+    unsigned char intermediate[SHA_LEN];
 
     s = *s1;			       /* structure copy */
     SHA_Final(&s, intermediate);
@@ -1610,14 +1653,16 @@ const char *doit_incoming_data(doit_ctx *ctx, void *buf, int len) /*{{{*/
                 aes_setiv(&ctx->incomingK, digest);
 
                 doit_makekey(ctx, 'M', OUTGOING, digest);
-                hmac_sha1_key(&ctx->outgoing1, &ctx->outgoing2, digest, 20);
+                hmac_sha_key(&ctx->outgoing1, &ctx->outgoing2, digest,
+                             SHA_LEN);
 
                 doit_makekey(ctx, 'M', INCOMING, digest);
-                hmac_sha1_key(&ctx->incoming1, &ctx->incoming2, digest, 20);
+                hmac_sha_key(&ctx->incoming1, &ctx->incoming2, digest,
+                             SHA_LEN);
 
                 doit_makekey(ctx, 'p', OUTGOING, digest);
                 SHA_Init(&ctx->paddingH);
-                SHA_Bytes(&ctx->paddingH, digest, 20);
+                SHA_Bytes(&ctx->paddingH, digest, SHA_LEN);
 
                 memset(ctx->secret, 0, ctx->secret_len);
                 free(ctx->secret);

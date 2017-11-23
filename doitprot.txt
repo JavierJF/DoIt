@@ -25,9 +25,9 @@ The normal protocol greeting is as follows:
   uint32                       secret-id-length
   data[secret-id-length]       secret-id
 
-The protocol-version described in this document is 0x10001.
+The protocol-version described in this document is 0x10002.
 
-The secret-id is a SHA-1 hash of the following data:
+The secret-id is a SHA-256 hash of the following data:
 
   char                         "I"
   uint32                       nonce-length
@@ -35,7 +35,7 @@ The secret-id is a SHA-1 hash of the following data:
   uint32                       secret-preid-length
   data[secret-preid-length]    secret-preid
 
-and the secret-preid in turn is a SHA-1 hash of the following data:
+and the secret-preid in turn is a SHA-256 hash of the following data:
 
   char                         "i"
   uint32                       nonce-length
@@ -66,7 +66,7 @@ block size.)
 
 Everything except the MAC is encrypted, using 128-bit AES in CBC
 mode. The encryption key used on each side to encrypt outgoing data
-is the first 128 bits of a SHA-1 hash of the following:
+is the first 128 bits of a SHA-256 hash of the following:
 
   char                         "K"
   uint32                       shared-secret-length
@@ -84,7 +84,7 @@ outgoing encryption key).
 The IV is derived similarly, but uses "I" instead of "K" at the
 start.
 
-The MAC in each packet is an HMAC-SHA-1 of _all_ the plaintext that
+The MAC in each packet is an HMAC-SHA-256 of _all_ the plaintext that
 side has sent up to that point. That is, after two packets the MAC
 will cover the data
 
@@ -94,7 +94,7 @@ will cover the data
   data[packet-2-length]        packet-2-data
 
 and so on. The MAC key used by each side for outgoing data is a full
-160-bit SHA-1 hash of the following data:
+256-bit SHA-256 hash of the following data:
 
   char                         "M"
   uint32                       shared-secret-length
