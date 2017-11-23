@@ -1792,6 +1792,11 @@ void *doit_send(doit_ctx *ctx, void *buf, int len, int *output_len) /*{{{*/
 }
 /*}}}*/
 
+unsigned doit_protocol_version(void)
+{
+    return PROTOCOL_VERSION;
+}
+
 /*{{{ testing implementation of main() */
 #ifdef TESTMODE
 

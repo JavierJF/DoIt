@@ -927,11 +927,21 @@ extern int listener_wndproc(HWND hwnd, UINT message,
 
 void showversion(int line, char *buffer)
 {
+    switch (line) {
+      case 0:
 #ifdef VERSION
-    sprintf(buffer, "%.16s version %.80s", listener_appname, STR(VERSION));
+        sprintf(buffer, "%.16s version %.80s", listener_appname, STR(VERSION));
 #else
-    sprintf(buffer, "%.16s unknown version", listener_appname);
+        sprintf(buffer, "%.16s unknown version", listener_appname);
 #endif
+        break;
+      case 1:
+        sprintf(buffer, "Protocol version: %#x", doit_protocol_version());
+        break;
+      default:
+        *buffer = '\0';
+        break;
+    }
 }
 
 static INT_PTR CALLBACK AboutProc(HWND hwnd, UINT msg,

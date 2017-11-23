@@ -62,6 +62,11 @@ int doit_read(doit_ctx *ctx, void *buf, int len);
 void *doit_send(doit_ctx *ctx, void *buf, int len, int *output_len);
 
 /*
+ * Return the supported protocol version.
+ */
+unsigned doit_protocol_version(void);
+
+/*
  * These come in handy in a couple of places.
  */
 

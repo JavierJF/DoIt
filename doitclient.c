@@ -477,6 +477,8 @@ void showversion(void)
 #else
     printf("doitclient unknown version\n");
 #endif
+
+    printf("Protocol version: %#x\n", doit_protocol_version());
 }
 
 /*
