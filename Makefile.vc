@@ -6,6 +6,7 @@
 # the command line.
 
 CL_CMD = cl /nologo /W3 /YX /Yd /D_WINDOWS /DDEBUG /ML /Fd
+INTERNAL_CFLAGS = -D_CRT_SECURE_NO_WARNINGS
 LINK_CMD = link /incremental:no
 RC_CMD = rc -r
 DEL = del
@@ -15,7 +16,7 @@ LFLAGS =
 .SUFFIXES: .c .obj
 
 .c.obj:
-	$(CL_CMD) $(CFLAGS) $(COMPAT) $(VER) /c $*.c
+	$(CL_CMD) $(INTERNAL_CFLAGS) $(CFLAGS) $(COMPAT) $(VER) /c $*.c
 
 LIBS = gdi32.lib user32.lib wsock32.lib shell32.lib
 
