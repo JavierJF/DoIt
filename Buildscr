@@ -8,6 +8,13 @@ set Version $(!builddate).$(vcsid)
 in doit do perl -i -pe 's/6.66/$(Version)/ if /AC_INIT/' configure.ac
 in doit do ./mkauto.sh
 
+# Build and run the test suite, in a self-delegation to avoid
+# cluttering up the directory.
+delegate -
+  in doit do ./configure
+  in doit do make check
+enddelegate
+
 # Substitute the right revision number in the README.
 in doit do perl -i -pe 's/<<VER>>/$(Version)/' README
 

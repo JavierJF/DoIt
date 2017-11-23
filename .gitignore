@@ -3,6 +3,7 @@
 *.obj
 *.res
 /doitclient
+/protocol-test
 /build.log
 /build.out
 /.deps
