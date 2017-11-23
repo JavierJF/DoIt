@@ -18,15 +18,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #include "doit.h"
-
-typedef unsigned int uint32;
 
 /*{{{ SHA-1 implementation */
 
 typedef struct {
-    uint32 h[5];
+    uint32_t h[5];
 } SHA_Core_State;
 
 #define SHA_BLKSIZE 64
@@ -35,14 +34,14 @@ typedef struct {
     SHA_Core_State core;
     unsigned char block[SHA_BLKSIZE];
     int blkused;
-    uint32 lenhi, lenlo;
+    uint32_t lenhi, lenlo;
 } SHA_State;
 
 /* ----------------------------------------------------------------------
  * Core SHA algorithm: processes 16-word blocks into a message digest.
  */
 
-#define rol(x,y) ( ((x) << (y)) | (((uint32)x) >> (32-y)) )
+#define rol(x,y) ( ((x) << (y)) | (((uint32_t)x) >> (32-y)) )
 
 void SHA_Core_Init(SHA_Core_State *s) {
     s->h[0] = 0x67452301;
@@ -52,35 +51,35 @@ void SHA_Core_Init(SHA_Core_State *s) {
     s->h[4] = 0xc3d2e1f0;
 }
 
-void SHA_Block(SHA_Core_State *s, uint32 *block) {
-    uint32 w[80];
-    uint32 a,b,c,d,e;
+void SHA_Block(SHA_Core_State *s, uint32_t *block) {
+    uint32_t w[80];
+    uint32_t a,b,c,d,e;
     int t;
 
     for (t = 0; t < 16; t++)
         w[t] = block[t];
 
     for (t = 16; t < 80; t++) {
-        uint32 tmp = w[t-3] ^ w[t-8] ^ w[t-14] ^ w[t-16];
+        uint32_t tmp = w[t-3] ^ w[t-8] ^ w[t-14] ^ w[t-16];
         w[t] = rol(tmp, 1);
     }
 
     a = s->h[0]; b = s->h[1]; c = s->h[2]; d = s->h[3]; e = s->h[4];
 
     for (t = 0; t < 20; t++) {
-        uint32 tmp = rol(a, 5) + ( (b&c) | (d&~b) ) + e + w[t] + 0x5a827999;
+        uint32_t tmp = rol(a, 5) + ( (b&c) | (d&~b) ) + e + w[t] + 0x5a827999;
         e = d; d = c; c = rol(b, 30); b = a; a = tmp;
     }
     for (t = 20; t < 40; t++) {
-        uint32 tmp = rol(a, 5) + (b^c^d) + e + w[t] + 0x6ed9eba1;
+        uint32_t tmp = rol(a, 5) + (b^c^d) + e + w[t] + 0x6ed9eba1;
         e = d; d = c; c = rol(b, 30); b = a; a = tmp;
     }
     for (t = 40; t < 60; t++) {
-        uint32 tmp = rol(a, 5) + ( (b&c) | (b&d) | (c&d) ) + e + w[t] + 0x8f1bbcdc;
+        uint32_t tmp = rol(a, 5) + ( (b&c) | (b&d) | (c&d) ) + e + w[t] + 0x8f1bbcdc;
         e = d; d = c; c = rol(b, 30); b = a; a = tmp;
     }
     for (t = 60; t < 80; t++) {
-        uint32 tmp = rol(a, 5) + (b^c^d) + e + w[t] + 0xca62c1d6;
+        uint32_t tmp = rol(a, 5) + (b^c^d) + e + w[t] + 0xca62c1d6;
         e = d; d = c; c = rol(b, 30); b = a; a = tmp;
     }
 
@@ -101,8 +100,8 @@ void SHA_Init(SHA_State *s) {
 
 void SHA_Bytes(SHA_State *s, const void *p, int len) {
     const unsigned char *q = (const unsigned char *)p;
-    uint32 wordblock[16];
-    uint32 lenw = len;
+    uint32_t wordblock[16];
+    uint32_t lenw = len;
     int i;
 
     /*
@@ -128,10 +127,10 @@ void SHA_Bytes(SHA_State *s, const void *p, int len) {
             /* Now process the block. Gather bytes big-endian into words */
             for (i = 0; i < 16; i++) {
                 wordblock[i] =
-                    ( ((uint32)s->block[i*4+0]) << 24 ) |
-                    ( ((uint32)s->block[i*4+1]) << 16 ) |
-                    ( ((uint32)s->block[i*4+2]) <<  8 ) |
-                    ( ((uint32)s->block[i*4+3]) <<  0 );
+                    ( ((uint32_t)s->block[i*4+0]) << 24 ) |
+                    ( ((uint32_t)s->block[i*4+1]) << 16 ) |
+                    ( ((uint32_t)s->block[i*4+2]) <<  8 ) |
+                    ( ((uint32_t)s->block[i*4+3]) <<  0 );
             }
             SHA_Block(&s->core, wordblock);
             s->blkused = 0;
@@ -145,7 +144,7 @@ void SHA_Final(SHA_State *s, unsigned char *output) {
     int i;
     int pad;
     unsigned char c[64];
-    uint32 lenhi, lenlo;
+    uint32_t lenhi, lenlo;
 
     if (s->blkused >= 56)
         pad = 56 + 64 - s->blkused;
@@ -246,17 +245,17 @@ static void hmac_sha1_key(SHA_State * s1, SHA_State * s2,
 typedef struct AESContext AESContext;
 
 struct AESContext {
-    uint32 keysched[(MAX_NR + 1) * MAX_NB];
-    uint32 invkeysched[(MAX_NR + 1) * MAX_NB];
-    void (*encrypt) (AESContext * ctx, uint32 * block);
-    void (*decrypt) (AESContext * ctx, uint32 * block);
-    uint32 iv[MAX_NB];
+    uint32_t keysched[(MAX_NR + 1) * MAX_NB];
+    uint32_t invkeysched[(MAX_NR + 1) * MAX_NB];
+    void (*encrypt) (AESContext * ctx, uint32_t * block);
+    void (*decrypt) (AESContext * ctx, uint32_t * block);
+    uint32_t iv[MAX_NB];
     int Nb, Nr;
 };
 
 static const unsigned char Sbox[256], Sboxinv[256];
-static const uint32 E0[256], E1[256], E2[256], E3[256];
-static const uint32 D0[256], D1[256], D2[256], D3[256];
+static const uint32_t E0[256], E1[256], E2[256], E3[256];
+static const uint32_t D0[256], D1[256], D2[256], D3[256];
 
 /*
  * Common macros in both the encryption and decryption routines.
@@ -286,15 +285,15 @@ static const uint32 D0[256], D1[256], D2[256], D3[256];
 			    (Sbox[(block[(i+C3)%Nb]      ) & 0xFF]      ) )
 
 /*
- * Core encrypt routines, expecting uint32 inputs read big-endian
+ * Core encrypt routines, expecting uint32_t inputs read big-endian
  * from the byte-oriented input stream.
  */
-static void aes_encrypt_nb_4(AESContext * ctx, uint32 * block)
+static void aes_encrypt_nb_4(AESContext * ctx, uint32_t * block)
 {
     int i;
     static const int C1 = 1, C2 = 2, C3 = 3, Nb = 4;
-    uint32 *keysched = ctx->keysched;
-    uint32 newstate[4];
+    uint32_t *keysched = ctx->keysched;
+    uint32_t newstate[4];
     for (i = 0; i < ctx->Nr - 1; i++) {
 	ADD_ROUND_KEY_4;
 	MAKEWORD(0);
@@ -317,12 +316,12 @@ static void aes_encrypt_nb_4(AESContext * ctx, uint32 * block)
     MOVEWORD(3);
     ADD_ROUND_KEY_4;
 }
-static void aes_encrypt_nb_6(AESContext * ctx, uint32 * block)
+static void aes_encrypt_nb_6(AESContext * ctx, uint32_t * block)
 {
     int i;
     static const int C1 = 1, C2 = 2, C3 = 3, Nb = 6;
-    uint32 *keysched = ctx->keysched;
-    uint32 newstate[6];
+    uint32_t *keysched = ctx->keysched;
+    uint32_t newstate[6];
     for (i = 0; i < ctx->Nr - 1; i++) {
 	ADD_ROUND_KEY_6;
 	MAKEWORD(0);
@@ -353,12 +352,12 @@ static void aes_encrypt_nb_6(AESContext * ctx, uint32 * block)
     MOVEWORD(5);
     ADD_ROUND_KEY_6;
 }
-static void aes_encrypt_nb_8(AESContext * ctx, uint32 * block)
+static void aes_encrypt_nb_8(AESContext * ctx, uint32_t * block)
 {
     int i;
     static const int C1 = 1, C2 = 3, C3 = 4, Nb = 8;
-    uint32 *keysched = ctx->keysched;
-    uint32 newstate[8];
+    uint32_t *keysched = ctx->keysched;
+    uint32_t newstate[8];
     for (i = 0; i < ctx->Nr - 1; i++) {
 	ADD_ROUND_KEY_8;
 	MAKEWORD(0);
@@ -415,15 +414,15 @@ static void aes_encrypt_nb_8(AESContext * ctx, uint32 * block)
 			   (Sboxinv[(block[(i+C3)%Nb]      ) & 0xFF]      ) )
 
 /*
- * Core decrypt routines, expecting uint32 inputs read big-endian
+ * Core decrypt routines, expecting uint32_t inputs read big-endian
  * from the byte-oriented input stream.
  */
-static void aes_decrypt_nb_4(AESContext * ctx, uint32 * block)
+static void aes_decrypt_nb_4(AESContext * ctx, uint32_t * block)
 {
     int i;
     static const int C1 = 4 - 1, C2 = 4 - 2, C3 = 4 - 3, Nb = 4;
-    uint32 *keysched = ctx->invkeysched;
-    uint32 newstate[4];
+    uint32_t *keysched = ctx->invkeysched;
+    uint32_t newstate[4];
     for (i = 0; i < ctx->Nr - 1; i++) {
 	ADD_ROUND_KEY_4;
 	MAKEWORD(0);
@@ -446,12 +445,12 @@ static void aes_decrypt_nb_4(AESContext * ctx, uint32 * block)
     MOVEWORD(3);
     ADD_ROUND_KEY_4;
 }
-static void aes_decrypt_nb_6(AESContext * ctx, uint32 * block)
+static void aes_decrypt_nb_6(AESContext * ctx, uint32_t * block)
 {
     int i;
     static const int C1 = 6 - 1, C2 = 6 - 2, C3 = 6 - 3, Nb = 6;
-    uint32 *keysched = ctx->invkeysched;
-    uint32 newstate[6];
+    uint32_t *keysched = ctx->invkeysched;
+    uint32_t newstate[6];
     for (i = 0; i < ctx->Nr - 1; i++) {
 	ADD_ROUND_KEY_6;
 	MAKEWORD(0);
@@ -482,12 +481,12 @@ static void aes_decrypt_nb_6(AESContext * ctx, uint32 * block)
     MOVEWORD(5);
     ADD_ROUND_KEY_6;
 }
-static void aes_decrypt_nb_8(AESContext * ctx, uint32 * block)
+static void aes_decrypt_nb_8(AESContext * ctx, uint32_t * block)
 {
     int i;
     static const int C1 = 8 - 1, C2 = 8 - 3, C3 = 8 - 4, Nb = 8;
-    uint32 *keysched = ctx->invkeysched;
-    uint32 newstate[8];
+    uint32_t *keysched = ctx->invkeysched;
+    uint32_t newstate[8];
     for (i = 0; i < ctx->Nr - 1; i++) {
 	ADD_ROUND_KEY_8;
 	MAKEWORD(0);
@@ -600,7 +599,7 @@ static const unsigned char Sboxinv[256] = {
     0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d
 };
 
-static const uint32 E0[256] = {
+static const uint32_t E0[256] = {
     0xc66363a5, 0xf87c7c84, 0xee777799, 0xf67b7b8d,
     0xfff2f20d, 0xd66b6bbd, 0xde6f6fb1, 0x91c5c554,
     0x60303050, 0x02010103, 0xce6767a9, 0x562b2b7d,
@@ -666,7 +665,7 @@ static const uint32 E0[256] = {
     0x824141c3, 0x299999b0, 0x5a2d2d77, 0x1e0f0f11,
     0x7bb0b0cb, 0xa85454fc, 0x6dbbbbd6, 0x2c16163a,
 };
-static const uint32 E1[256] = {
+static const uint32_t E1[256] = {
     0xa5c66363, 0x84f87c7c, 0x99ee7777, 0x8df67b7b,
     0x0dfff2f2, 0xbdd66b6b, 0xb1de6f6f, 0x5491c5c5,
     0x50603030, 0x03020101, 0xa9ce6767, 0x7d562b2b,
@@ -732,7 +731,7 @@ static const uint32 E1[256] = {
     0xc3824141, 0xb0299999, 0x775a2d2d, 0x111e0f0f,
     0xcb7bb0b0, 0xfca85454, 0xd66dbbbb, 0x3a2c1616,
 };
-static const uint32 E2[256] = {
+static const uint32_t E2[256] = {
     0x63a5c663, 0x7c84f87c, 0x7799ee77, 0x7b8df67b,
     0xf20dfff2, 0x6bbdd66b, 0x6fb1de6f, 0xc55491c5,
     0x30506030, 0x01030201, 0x67a9ce67, 0x2b7d562b,
@@ -798,7 +797,7 @@ static const uint32 E2[256] = {
     0x41c38241, 0x99b02999, 0x2d775a2d, 0x0f111e0f,
     0xb0cb7bb0, 0x54fca854, 0xbbd66dbb, 0x163a2c16,
 };
-static const uint32 E3[256] = {
+static const uint32_t E3[256] = {
     0x6363a5c6, 0x7c7c84f8, 0x777799ee, 0x7b7b8df6,
     0xf2f20dff, 0x6b6bbdd6, 0x6f6fb1de, 0xc5c55491,
     0x30305060, 0x01010302, 0x6767a9ce, 0x2b2b7d56,
@@ -864,7 +863,7 @@ static const uint32 E3[256] = {
     0x4141c382, 0x9999b029, 0x2d2d775a, 0x0f0f111e,
     0xb0b0cb7b, 0x5454fca8, 0xbbbbd66d, 0x16163a2c,
 };
-static const uint32 D0[256] = {
+static const uint32_t D0[256] = {
     0x51f4a750, 0x7e416553, 0x1a17a4c3, 0x3a275e96,
     0x3bab6bcb, 0x1f9d45f1, 0xacfa58ab, 0x4be30393,
     0x2030fa55, 0xad766df6, 0x88cc7691, 0xf5024c25,
@@ -930,7 +929,7 @@ static const uint32 D0[256] = {
     0x39a80171, 0x080cb3de, 0xd8b4e49c, 0x6456c190,
     0x7bcb8461, 0xd532b670, 0x486c5c74, 0xd0b85742,
 };
-static const uint32 D1[256] = {
+static const uint32_t D1[256] = {
     0x5051f4a7, 0x537e4165, 0xc31a17a4, 0x963a275e,
     0xcb3bab6b, 0xf11f9d45, 0xabacfa58, 0x934be303,
     0x552030fa, 0xf6ad766d, 0x9188cc76, 0x25f5024c,
@@ -996,7 +995,7 @@ static const uint32 D1[256] = {
     0x7139a801, 0xde080cb3, 0x9cd8b4e4, 0x906456c1,
     0x617bcb84, 0x70d532b6, 0x74486c5c, 0x42d0b857,
 };
-static const uint32 D2[256] = {
+static const uint32_t D2[256] = {
     0xa75051f4, 0x65537e41, 0xa4c31a17, 0x5e963a27,
     0x6bcb3bab, 0x45f11f9d, 0x58abacfa, 0x03934be3,
     0xfa552030, 0x6df6ad76, 0x769188cc, 0x4c25f502,
@@ -1062,7 +1061,7 @@ static const uint32 D2[256] = {
     0x017139a8, 0xb3de080c, 0xe49cd8b4, 0xc1906456,
     0x84617bcb, 0xb670d532, 0x5c74486c, 0x5742d0b8,
 };
-static const uint32 D3[256] = {
+static const uint32_t D3[256] = {
     0xf4a75051, 0x4165537e, 0x17a4c31a, 0x275e963a,
     0xab6bcb3b, 0x9d45f11f, 0xfa58abac, 0xe303934b,
     0x30fa5520, 0x766df6ad, 0xcc769188, 0x024c25f5,
@@ -1167,7 +1166,7 @@ void aes_setup(AESContext * ctx, int blocklen,
 	if (i < Nk)
 	    ctx->keysched[i] = GET_32BIT_MSB_FIRST(key + 4 * i);
 	else {
-	    uint32 temp = ctx->keysched[i - 1];
+	    uint32_t temp = ctx->keysched[i - 1];
 	    if (i % Nk == 0) {
 		int a, b, c, d;
 		a = (temp >> 16) & 0xFF;
@@ -1199,7 +1198,7 @@ void aes_setup(AESContext * ctx, int blocklen,
      */
     for (i = 0; i <= ctx->Nr; i++) {
 	for (j = 0; j < ctx->Nb; j++) {
-	    uint32 temp;
+	    uint32_t temp;
 	    temp = ctx->keysched[(ctx->Nr - i) * ctx->Nb + j];
 	    if (i != 0 && i != ctx->Nr) {
 		/*
@@ -1230,19 +1229,19 @@ static void aes_setiv(AESContext * ctx, unsigned char *iv)
 	ctx->iv[i] = GET_32BIT_MSB_FIRST(iv + 4 * i);
 }
 
-static void aes_encrypt(AESContext * ctx, uint32 * block)
+static void aes_encrypt(AESContext * ctx, uint32_t * block)
 {
     ctx->encrypt(ctx, block);
 }
 
-static void aes_decrypt(AESContext * ctx, uint32 * block)
+static void aes_decrypt(AESContext * ctx, uint32_t * block)
 {
     ctx->decrypt(ctx, block);
 }
 
 static void aes_encrypt_cbc(unsigned char *blk, int len, AESContext * ctx)
 {
-    uint32 iv[4];
+    uint32_t iv[4];
     int i;
 
     assert((len & 15) == 0);
@@ -1264,7 +1263,7 @@ static void aes_encrypt_cbc(unsigned char *blk, int len, AESContext * ctx)
 
 static void aes_decrypt_cbc(unsigned char *blk, int len, AESContext * ctx)
 {
-    uint32 iv[4], x[4], ct[4];
+    uint32_t iv[4], x[4], ct[4];
     int i;
 
     assert((len & 15) == 0);
