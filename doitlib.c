@@ -1804,6 +1804,14 @@ unsigned doit_protocol_version(void)
 
 #include <stdio.h>
 
+int get_nonce_preimage(unsigned *words) {
+    int toret = 0;
+    static unsigned counter = 0;
+    words[toret++] = time(NULL);
+    words[toret++] = counter++;
+    return toret;
+}
+
 int main(void) {
     doit_ctx *one, *two;
     char secret[] = "hush, hush, whisper who dares";
