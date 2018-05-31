@@ -1209,9 +1209,7 @@ int main(int argc, char **argv)
     } else {
 	if (verbose)
 	    fprintf(stderr, "doit: <<< %s\n", msg);
-	if (msg[0] != '+') {
-	    fprintf(stderr, "doit: remote error: %s\n", msg+1);
-	} else if (msg[1]) {
+	if (msg[1]) {
 	    /*
 	     * Extract error code.
 	     */
